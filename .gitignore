@@ -1,0 +1,30 @@
+# Logs et historique local
+fennec_logs.txt
+.fennec_history
+.fennec_bookmarks.json
+.fennec_bookmarks.tmp
+
+# Geek Uninstaller (binaire tiers)
+geek.exe
+
+# Environnement virtuel
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.spec
+
+# PyInstaller output
+fennec.exe
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
