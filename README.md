@@ -5,9 +5,9 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10+-blue?style=flat-square\&logo=python" />
+  <img src="https://img.shields.io/badge/Python-3.10+-blue?style=flat-square\\\&logo=python" />
   <img src="https://img.shields.io/badge/Ollama-qwen2.5:7b-orange?style=flat-square" />
-  <img src="https://img.shields.io/badge/Windows-10%2F11-0078D6?style=flat-square\&logo=windows" />
+  <img src="https://img.shields.io/badge/Windows-10%2F11-0078D6?style=flat-square\\\&logo=windows" />
   <img src="https://img.shields.io/badge/100%25-Local-blue?style=flat-square" />
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" />
 </p>
@@ -34,7 +34,7 @@ cd Fennec
 
 Puis double-clique sur **`fennec.bat`** — il installe les dépendances, démarre Ollama et télécharge le modèle automatiquement.
 
-> ⏱️ Le premier lancement télécharge `qwen2.5:7b` (\~4.7 Go). Les suivants sont instantanés.
+> ⏱️ Le premier lancement télécharge `qwen2.5:7b` (\\\~4.7 Go). Les suivants sont instantanés.
 
 \---
 
@@ -42,28 +42,28 @@ Puis double-clique sur **`fennec.bat`** — il installe les dépendances, démar
 
 |Commande|Description|
 |-|-|
-|`list \[dossier]`|Lister les fichiers|
-|`find \*.ext \[dossier]`|Recherche récursive|
-|`read \[fichier] \[n]`|Lire un fichier (n lignes max)|
-|`write \[fichier] \[texte]`|Écrire dans un fichier|
-|`delete \[fichier]`|Supprimer un fichier ou dossier ⚠️|
-|`rename \[ancien] \[nouveau]`|Renommage en masse avec `\*`|
-|`move \[source] \[dest]`|Déplacer ⚠️|
-|`duplicate \[source]`|Copier|
-|`sort \[dossier] \[taille\|date]`|Trier par taille ou date|
-|`redate \[dossier]`|Renommer par date de création ⚠️|
-|`open \[chemin]`|Ouvrir avec l'application Windows associée|
-|`clip \[chemin]`|Copier le chemin dans le presse-papier|
-|`exec \[commande]`|Exécuter une commande CMD ⚠️|
-|`search \[terme]`|Recherche web DuckDuckGo + synthèse IA|
-|`download \[url]`|Télécharger un fichier|
-|`install \[programme]`|Installer via winget ⚠️|
-|`uninstall \[programme]`|Désinstaller + nettoyage registre ⚠️|
-|`bm \[list\|add\|remove] \[nom]`|Favoris de dossiers|
-|`agent \[instruction]`|Agent IA autonome (max 8 étapes)|
+|`list \\\[dossier]`|Lister les fichiers|
+|`find \\\*.ext \\\[dossier]`|Recherche récursive|
+|`read \\\[fichier] \\\[n]`|Lire un fichier (n lignes max)|
+|`write \\\[fichier] \\\[texte]`|Écrire dans un fichier|
+|`delete \\\[fichier]`|Supprimer un fichier ou dossier ⚠️|
+|`rename \\\[ancien] \\\[nouveau]`|Renommage en masse avec `\\\*`|
+|`move \\\[source] \\\[dest]`|Déplacer ⚠️|
+|`duplicate \\\[source]`|Copier|
+|`sort \\\[dossier] \\\[taille\|date]`|Trier par taille ou date|
+|`redate \\\[dossier]`|Renommer par date de création ⚠️|
+|`open \\\[chemin]`|Ouvrir avec l'application Windows associée|
+|`clip \\\[chemin]`|Copier le chemin dans le presse-papier|
+|`exec \\\[commande]`|Exécuter une commande CMD ⚠️|
+|`search \\\[terme]`|Recherche web DuckDuckGo + synthèse IA|
+|`download \\\[url]`|Télécharger un fichier|
+|`install \\\[programme]`|Installer via winget ⚠️|
+|`uninstall \\\[programme]`|Désinstaller + nettoyage registre ⚠️|
+|`bm \\\[list\|add\|remove] \\\[nom]`|Favoris de dossiers|
+|`agent \\\[instruction]`|Agent IA autonome (max 8 étapes)|
 |`chat`|Conversation libre avec Qwen|
-|`helpchat \[question]`|Aide intégrée sur Fennec|
-|`logs \[n]`|Derniers logs|
+|`helpchat \\\[question]`|Aide intégrée sur Fennec|
+|`logs \\\[n]`|Derniers logs|
 |`help`|Liste toutes les commandes|
 |`exit`|Quitter|
 
@@ -82,8 +82,8 @@ agent trouve les 5 fichiers les plus lourds de mon bureau
 agent supprime tous les fichiers .tmp du dossier courant
 
 # Renommage en masse
-rename \*.JPG \*.jpg
-rename rapport\_\* note\_\*
+rename \\\*.JPG \\\*.jpg
+rename rapport\\\_\\\* note\\\_\\\*
 
 # Chat avec contexte web automatique
 chat
@@ -97,7 +97,7 @@ En tête de `fennec.py` :
 
 ```python
 MODEL      = "qwen2.5:7b"              # modèle Ollama (ex: llama3, mistral)
-OLLAMA\_URL = "http://localhost:11434"  # URL du serveur Ollama
+OLLAMA\\\_URL = "http://localhost:11434"  # URL du serveur Ollama
 ```
 
 \---
