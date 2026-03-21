@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/badge/Python-3.10+-blue?style=flat-square&logo=python" />
   <img src="https://img.shields.io/badge/Ollama-qwen2.5:7b-orange?style=flat-square" />
   <img src="https://img.shields.io/badge/Windows-10%2F11-0078D6?style=flat-square&logo=windows" />
-  <img src="https://img.shields.io/badge/100%25-Local-green?style=flat-square" />
+  <img src="https://img.shields.io/badge/100%25-Local-blue?style=flat-square" />
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" />
 </p>
 
@@ -12,34 +12,20 @@
 
 ---
 
-## 🚀 Démarrage rapide
+## 🚀 Démarrage
 
-### 1 — Installe Python
-Télécharge et installe Python 3.10+ depuis [python.org](https://python.org/downloads).
+**Prérequis :**
+- [Python 3.10+](https://python.org/downloads) — coche **"Add Python to PATH"** à l'installation
+- [Ollama](https://ollama.com) — le moteur IA local
 
-> ⚠️ Coche **"Add Python to PATH"** pendant l'installation.
-
-### 2 — Installe Ollama
-Télécharge et installe Ollama depuis [ollama.com](https://ollama.com).
-
-> Ollama fait tourner le modèle IA en local sur ta machine.
-
-### 3 — Télécharge Fennec
+**Lancement :**
 ```bash
 git clone https://github.com/kinowill/Fennec.git
 cd Fennec
 ```
-Ou télécharge le ZIP depuis GitHub → **Code → Download ZIP**, puis extrais le dossier.
+Puis double-clique sur **`fennec.bat`** — il installe les dépendances, démarre Ollama et télécharge le modèle automatiquement.
 
-### 4 — Lance Fennec
-Double-clique sur **`fennec.bat`**
-
-C'est tout. Le script s'occupe automatiquement de :
-- Installer les dépendances Python (`rich`, `prompt_toolkit`, `pdfplumber`, `python-docx`)
-- Démarrer Ollama en arrière-plan si nécessaire
-- Télécharger le modèle `qwen2.5:7b` (~4.7 Go) au premier lancement
-
-> ⏱️ Le premier lancement peut prendre plusieurs minutes selon ta connexion (téléchargement du modèle). Les lancements suivants sont instantanés.
+> ⏱️ Le premier lancement télécharge `qwen2.5:7b` (~4.7 Go). Les suivants sont instantanés.
 
 ---
 
@@ -60,19 +46,19 @@ C'est tout. Le script s'occupe automatiquement de :
 | `open [chemin]` | Ouvrir avec l'application Windows associée |
 | `clip [chemin]` | Copier le chemin dans le presse-papier |
 | `exec [commande]` | Exécuter une commande CMD ⚠️ |
-| `search [terme]` | Recherche web (DuckDuckGo + synthèse IA) |
+| `search [terme]` | Recherche web DuckDuckGo + synthèse IA |
 | `download [url]` | Télécharger un fichier |
 | `install [programme]` | Installer via winget ⚠️ |
-| `uninstall [programme]` | Désinstaller + nettoyage ⚠️ |
-| `bm [list\|add\|remove] [nom]` | Gérer les favoris de dossiers |
+| `uninstall [programme]` | Désinstaller + nettoyage registre ⚠️ |
+| `bm [list\|add\|remove] [nom]` | Favoris de dossiers |
 | `agent [instruction]` | Agent IA autonome (max 8 étapes) |
 | `chat` | Conversation libre avec Qwen |
 | `helpchat [question]` | Aide intégrée sur Fennec |
-| `logs [n]` | Afficher les derniers logs |
-| `help` | Afficher toutes les commandes |
+| `logs [n]` | Derniers logs |
+| `help` | Liste toutes les commandes |
 | `exit` | Quitter |
 
-> ⚠️ = confirmation requise avant exécution
+> ⚠️ = confirmation requise
 
 ---
 
@@ -87,17 +73,11 @@ agent trouve les 5 fichiers les plus lourds de mon bureau
 agent supprime tous les fichiers .tmp du dossier courant
 
 # Renommage en masse
-rename *.JPG *.jpg              # changer l'extension
-rename rapport_* note_*         # remplacer un mot
-rename . * 2024_*               # ajouter un préfixe
-
-# Installer / désinstaller
-install VLC
-uninstall AnyDesk
+rename *.JPG *.jpg
+rename rapport_* note_*
 
 # Chat avec contexte web automatique
 chat
-toi > quelle météo à Paris ce soir ?
 ```
 
 ---
@@ -113,18 +93,18 @@ OLLAMA_URL = "http://localhost:11434"  # URL du serveur Ollama
 
 ---
 
-## 💡 Optionnel — Nettoyage après désinstallation
+## 💡 Optionnel
 
-Place [Geek Uninstaller](https://geekuninstaller.com) (gratuit, portable) renommé en `geek.exe` dans le dossier Fennec. La commande `uninstall` l'ouvrira automatiquement après chaque désinstallation pour nettoyer les restes du registre.
+Place [Geek Uninstaller](https://geekuninstaller.com) (gratuit, portable) renommé en `geek.exe` dans le dossier Fennec pour nettoyer le registre après chaque `uninstall`.
 
 ---
 
 ## 🔒 Confidentialité
 
-Fennec est **100% local**. Qwen2.5 tourne sur ta machine via Ollama. Aucune donnée n'est envoyée à un serveur externe, sauf lors des recherches web DuckDuckGo.
+100% local. Qwen2.5 tourne sur ta machine via Ollama. Aucune donnée envoyée à l'extérieur, sauf les recherches web DuckDuckGo.
 
 ---
 
 ## 📄 Licence
 
-MIT — fais-en ce que tu veux.
+MIT
