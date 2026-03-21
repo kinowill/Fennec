@@ -19,7 +19,7 @@
 - [Ollama](https://ollama.com) — le moteur IA local
 
 **Lancement :**
-```bash
+```text
 git clone https://github.com/kinowill/Fennec.git
 cd Fennec
 ```
@@ -64,7 +64,7 @@ Puis double-clique sur **`fennec.bat`** — il installe les dépendances, démar
 
 ## 💡 Exemples
 
-```bash
+```text
 # Recherche web avec réponse IA
 search météo montpellier aujourd'hui
 
