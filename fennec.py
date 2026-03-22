@@ -1,8 +1,8 @@
 """
-Fennec — Assistant fichiers Windows + IA locale
-================================================
-Dépendances : pip install rich prompt_toolkit
-Ollama requis : https://ollama.com  (ollama pull qwen2.5:7b)
+Fennec — AI-powered Windows file shell
+========================================
+Dependencies : pip install rich prompt_toolkit
+Ollama required : https://ollama.com  (ollama pull qwen2.5:7b)
 """
 
 import os
@@ -12,6 +12,8 @@ import html as _html
 import json
 import shlex
 import shutil
+import fnmatch
+import difflib
 import subprocess
 import ctypes
 import locale
@@ -24,7 +26,7 @@ try:
     from rich.markup import escape
     from rich.progress import Progress, SpinnerColumn, TextColumn
 except ImportError:
-    raise SystemExit("Installe rich : pip install rich")
+    raise SystemExit("Install rich: pip install rich")
 
 try:
     from prompt_toolkit import PromptSession
@@ -32,39 +34,195 @@ try:
     from prompt_toolkit.history import FileHistory
     from prompt_toolkit.styles import Style
     from prompt_toolkit.formatted_text import HTML
+    from prompt_toolkit.key_binding import KeyBindings as _KB
 except ImportError:
-    raise SystemExit("Installe prompt_toolkit : pip install prompt_toolkit")
+    raise SystemExit("Install prompt_toolkit: pip install prompt_toolkit")
 
+# ── Encoding ──────────────────────────────────────────────────────────────────
+_enc = locale.getpreferredencoding(False) or "utf-8"
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
 BASE_DIR       = Path(__file__).parent
 LOG_FILE       = BASE_DIR / "fennec_logs.txt"
 HIST_FILE      = BASE_DIR / ".fennec_history"
 BOOKMARKS_FILE = BASE_DIR / ".fennec_bookmarks.json"
-MODEL          = "qwen2.5:7b"
-OLLAMA_URL     = "http://localhost:11434"
+CONFIG_FILE    = BASE_DIR / "fennec_config.json"
+TRASH_DIR      = BASE_DIR / ".fennec_trash"
+GEEK_EXE       = BASE_DIR / "geek.exe"
 
+# ── Config ────────────────────────────────────────────────────────────────────
+_DEFAULT_CONFIG = {
+    "model":      "qwen2.5:7b",
+    "ollama_url": "http://localhost:11434",
+    "lang":       "fr",
+    "max_steps":  0,
+    "aliases":    {},
+}
+
+def charger_config():
+    if CONFIG_FILE.exists():
+        try:
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+            cfg = dict(_DEFAULT_CONFIG)
+            cfg.update(data)
+            return cfg
+        except Exception:
+            pass
+    return dict(_DEFAULT_CONFIG)
+
+def sauver_config(cfg):
+    tmp = CONFIG_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Keep one backup before replacing
+    if CONFIG_FILE.exists():
+        CONFIG_FILE.replace(CONFIG_FILE.with_suffix(".bak"))
+    tmp.replace(CONFIG_FILE)
+
+_cfg      = charger_config()
+MODEL     = _cfg["model"]
+OLLAMA_URL= _cfg["ollama_url"]
+LANG      = _cfg["lang"]
+_aliases  = dict(_cfg.get("aliases", {}))
+
+# ── i18n ──────────────────────────────────────────────────────────────────────
+_STRINGS = {
+    "fr": {
+        "confirm_prompt":     "Confirmer ? (o/n) :",
+        "confirm_yes":        ("o","y","oui","yes"),
+        "ollama_down":        "Ollama ne repond pas. Lance : ollama serve",
+        "no_reply":           "Pas de reponse de Qwen.",
+        "cancelled":          "Annule.",
+        "error":              "Erreur : ",
+        "not_found":          "Introuvable : ",
+        "ok":                 "OK",
+        "chat_header":        "-- Chat Qwen  (exit pour quitter) --",
+        "chat_back":          "Retour a Fennec.",
+        "chat_you":           "toi >",
+        "agent_label":        "Agent : ",
+        "agent_thinking":     "Qwen reflechit... (etape {s}/{m})",
+        "agent_estimating":   "Estimation complexite...",
+        "agent_no_cmd":       "Qwen n'a pas specifie de commande.",
+        "agent_refused":      "Action refusee par l'utilisateur. Propose autre chose.",
+        "agent_limit":        "Limite de {n} etapes atteinte.",
+        "agent_extended":     "Extension -> {n} etapes max",
+        "agent_complexity":   "Complexite estimee -> {n} etapes max",
+        "agent_no_tool_first":"NON. Tu ne peux pas repondre sans avoir utilise au moins un outil. "
+                              "Utilise d'abord list, find, sort ou exec. Reponds avec {\"action\":\"tool\",...}.",
+        "undo_empty":         "Rien a annuler.",
+        "undo_ok":            "Annule : {name}",
+        "deleted_to_trash":   "Deplace en corbeille : {name}",
+        "settings_saved":     "Parametres sauvegardes.",
+        "settings_header":    "-- Parametres Fennec --",
+        "alias_added":        "Alias ajoute : {k} -> {v}",
+        "alias_removed":      "Alias supprime : {k}",
+        "alias_list":         "-- Alias --",
+        "alias_none":         "Aucun alias.",
+        "diff_same":          "Fichiers identiques.",
+        "diff_header":        "-- diff {a} vs {b} --",
+        "web_injected":       "(donnees web injectees)",
+        "web_none":           "(pas de resultat web, Qwen repond de memoire)",
+        "cmd_detected":       "-> commande Fennec detectee, execution directe",
+        "install_tip":        "Astuce : essaie avec l'ID exact (ex: install VideoLAN.VLC)",
+        "search_label":       "Recherche : ",
+        "no_result":          "Aucun resultat.",
+        "opening_browser":    "Ouverture navigateur...",
+        "goodbye":            "Au revoir.",
+        "ctrl_c":             "Ctrl+C -- tape exit pour quitter.",
+    },
+    "en": {
+        "confirm_prompt":     "Confirm? (y/n):",
+        "confirm_yes":        ("y","yes","o","oui"),
+        "ollama_down":        "Ollama not responding. Run: ollama serve",
+        "no_reply":           "No reply from Qwen.",
+        "cancelled":          "Cancelled.",
+        "error":              "Error: ",
+        "not_found":          "Not found: ",
+        "ok":                 "OK",
+        "chat_header":        "-- Chat Qwen  (exit to quit) --",
+        "chat_back":          "Back to Fennec.",
+        "chat_you":           "you >",
+        "agent_label":        "Agent: ",
+        "agent_thinking":     "Qwen thinking... (step {s}/{m})",
+        "agent_estimating":   "Estimating complexity...",
+        "agent_no_cmd":       "Qwen did not specify a command.",
+        "agent_refused":      "Action refused by user. Suggest something else.",
+        "agent_limit":        "Step limit of {n} reached.",
+        "agent_extended":     "Extended -> {n} max steps",
+        "agent_complexity":   "Estimated complexity -> {n} max steps",
+        "agent_no_tool_first":"NO. You cannot answer without using at least one tool. "
+                              "Use list, find, sort or exec first. Reply with {\"action\":\"tool\",...}.",
+        "undo_empty":         "Nothing to undo.",
+        "undo_ok":            "Undone: {name}",
+        "deleted_to_trash":   "Moved to trash: {name}",
+        "settings_saved":     "Settings saved.",
+        "settings_header":    "-- Fennec Settings --",
+        "alias_added":        "Alias added: {k} -> {v}",
+        "alias_removed":      "Alias removed: {k}",
+        "alias_list":         "-- Aliases --",
+        "alias_none":         "No aliases.",
+        "diff_same":          "Files are identical.",
+        "diff_header":        "-- diff {a} vs {b} --",
+        "web_injected":       "(web data injected)",
+        "web_none":           "(no web result, Qwen answers from memory)",
+        "cmd_detected":       "-> Fennec command detected, executing directly",
+        "install_tip":        "Tip: try the exact ID (e.g. install VideoLAN.VLC)",
+        "search_label":       "Search: ",
+        "no_result":          "No results.",
+        "opening_browser":    "Opening browser...",
+        "goodbye":            "Goodbye.",
+        "ctrl_c":             "Ctrl+C -- type exit to quit.",
+    },
+}
+
+def t(key, **kw):
+    s = _STRINGS.get(LANG, _STRINGS["fr"]).get(key, _STRINGS["fr"].get(key, key))
+    return s.format(**kw) if kw else s
+
+# ── Agent whitelist ───────────────────────────────────────────────────────────
 AGENT_CMDS_VALIDES = {"list","ls","find","sort","read","open","cd","exec",
                       "delete","move","duplicate","clip","rename","write"}
 
-console      = Console(highlight=False)
-cwd          = Path.cwd()
-_bm_cache    = None  # cache bookmarks
+# ── State ─────────────────────────────────────────────────────────────────────
+console     = Console(highlight=False)
+cwd         = Path.cwd()
+_bm_cache   = None
+_session    = None
+_undo_stack = []
+_agent_mode    = False   # when True, confirmer() auto-approves (agent already confirmed)
+_auto_confirm  = False   # sudo mode: auto-approve ALL confirmations including agent-level
 
 def log(action, details=""):
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}]  {action}  |  {details}\n")
 
+def pr(txt):
+    console.print(txt)
+
 def confirmer(msg):
-    console.print(f"[yellow]⚠  {escape(msg)}[/yellow]")
-    console.print("[yellow]  Confirmer ? (o/n) :[/yellow] ", end="")
-    return input().strip().lower() in ("o", "y", "oui", "yes")
+    if _agent_mode or _auto_confirm:
+        return True
+    console.print(f"[yellow]  {escape(msg)}[/yellow]")
+    console.print(f"[yellow]  {t('confirm_prompt')}[/yellow] ", end="")
+    try:
+        rep = input().strip().lower()
+    except (KeyboardInterrupt, EOFError):
+        return False
+    return rep in t("confirm_yes")
 
 def resoudre(chemin):
     bm = charger_bookmarks()
     if chemin in bm:
         return Path(bm[chemin])
     p = Path(chemin)
-    return p if p.is_absolute() else cwd / p
+    resolved = p if p.is_absolute() else cwd / p
+    # Block path traversal attempts (../../ etc) outside of absolute paths
+    try:
+        resolved.resolve()  # raises on bad paths on some OS
+    except Exception:
+        pass
+    return resolved
 
+# ── Bookmarks ─────────────────────────────────────────────────────────────────
 def charger_bookmarks():
     global _bm_cache
     if _bm_cache is not None:
@@ -86,16 +244,13 @@ def sauver_bookmarks(bm):
     tmp.replace(BOOKMARKS_FILE)
 
 def fmt_taille(n):
-    for u in ("o", "Ko", "Mo", "Go"):
+    for u in ("o","Ko","Mo","Go"):
         if n < 1024:
             return f"{n:.0f}{u}"
         n /= 1024
     return f"{n:.1f}To"
 
-def pr(txt):
-    console.print(txt)
-
-
+# ── Ollama ────────────────────────────────────────────────────────────────────
 def ollama_vivant():
     try:
         urllib.request.urlopen(OLLAMA_URL, timeout=3)
@@ -105,11 +260,12 @@ def ollama_vivant():
 
 def verifier_ollama():
     if not ollama_vivant():
-        pr("[red]Ollama ne repond pas. Lance : ollama serve[/red]")
+        pr(f"[red]{t('ollama_down')}[/red]")
         return False
     return True
 
 def appel_chat(messages, fmt_json=False):
+    """Blocking call. Returns full response. Used for agent (JSON mode) and short queries."""
     payload = json.dumps({
         "model":    MODEL,
         "messages": messages,
@@ -128,9 +284,48 @@ def appel_chat(messages, fmt_json=False):
             return data.get("message", {}).get("content", "").strip()
     except Exception as e:
         log("ollama_error", str(e))
-        console.print(f"[red]Erreur Ollama : [/red]", end=""); console.print(str(e), markup=False)
+        console.print(f"[red]{t('error')}[/red]", end="")
+        console.print(str(e), markup=False)
         return ""
 
+def appel_chat_stream(messages):
+    """Streaming call — prints tokens as they arrive. Returns full text.
+    NOTE: incompatible with fmt_json=True. Use only for chat/helpchat."""
+    payload = json.dumps({
+        "model":    MODEL,
+        "messages": messages,
+        "stream":   True,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"{OLLAMA_URL}/api/chat",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    full = []
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            for line in resp:
+                if not line.strip():
+                    continue
+                try:
+                    chunk = json.loads(line.decode("utf-8"))
+                except Exception:
+                    continue
+                token = chunk.get("message", {}).get("content", "")
+                if token:
+                    print(token, end="", flush=True)
+                    full.append(token)
+                if chunk.get("done"):
+                    break
+        print()
+    except Exception as e:
+        log("ollama_stream_error", str(e))
+        console.print(f"\n[red]{t('error')}[/red]", end="")
+        console.print(str(e), markup=False)
+    return "".join(full)
+
+# ── Navigation ────────────────────────────────────────────────────────────────
 def cmd_cd(dest=""):
     global cwd
     if not dest:
@@ -138,7 +333,7 @@ def cmd_cd(dest=""):
         return
     np = resoudre(dest)
     if not np.exists() or not np.is_dir():
-        console.print(f"[red]Introuvable : {escape(str(np))}[/red]")
+        console.print(f"[red]{t('not_found')}{escape(str(np))}[/red]")
         return
     cwd = np.resolve()
     pr(f"[green]> {cwd}[/green]")
@@ -147,7 +342,7 @@ def cmd_cd(dest=""):
 def cmd_list(dossier=""):
     dp = resoudre(dossier) if dossier else cwd
     if not dp.exists():
-        console.print(f"[red]Introuvable : {escape(str(dp))}[/red]")
+        console.print(f"[red]{t('not_found')}{escape(str(dp))}[/red]")
         return
     console.print(f"[cyan]{escape(str(dp.resolve()))}[/cyan]")
     entries = sorted(dp.iterdir(), key=lambda e: (e.is_file(), e.name.lower()))
@@ -160,41 +355,61 @@ def cmd_list(dossier=""):
                 mod = datetime.fromtimestamp(e.stat().st_mtime).strftime("%d/%m/%y")
                 console.print(f"  {e.name}  {sz}  {mod}", markup=False)
         except PermissionError:
-            console.print(f"  {e.name}  (acces refuse)", markup=False)
+            console.print(f"  {e.name}  (access denied)", markup=False)
     log("list", str(dp))
 
-def cmd_find(motif, dossier=""):
+def cmd_find(motif, dossier="", depth=""):
+    """Recursive search with optional max depth. Uses os.walk + fnmatch."""
     racine = resoudre(dossier) if dossier else cwd
     if not racine.exists():
-        console.print(f"[red]Introuvable : {escape(str(racine))}[/red]")
+        console.print(f"[red]{t('not_found')}{escape(str(racine))}[/red]")
         return
-    LIMITE_AFFICHAGE = 500
-    with Progress(SpinnerColumn(), TextColumn("[cyan]Recherche..."), transient=True) as prog:
+    try:
+        max_depth = int(depth) if depth else None
+    except ValueError:
+        max_depth = None
+
+    LIMITE = 500
+    resultats = []
+    spin_txt = "[cyan]Searching..." if LANG == "en" else "[cyan]Recherche..."
+    with Progress(SpinnerColumn(), TextColumn(spin_txt), transient=True) as prog:
         prog.add_task("")
-        resultats = sorted(racine.rglob(motif))
+        for root, dirs, files in os.walk(racine):
+            cur_depth = len(Path(root).relative_to(racine).parts)
+            if max_depth is not None and cur_depth >= max_depth:
+                dirs.clear()
+            for name in files:
+                if fnmatch.fnmatch(name, motif):
+                    resultats.append(Path(root) / name)
+            for name in dirs:
+                if fnmatch.fnmatch(name, motif):
+                    resultats.append(Path(root) / name)
+    resultats.sort()
     if not resultats:
-        pr(f"[yellow]Aucun resultat : {motif}[/yellow]")
+        pr(f"[yellow]{t('no_result')} {motif}[/yellow]")
         return
-    pr(f"[cyan]{len(resultats)} resultat(s) — {motif}[/cyan]")
-    for r in resultats[:LIMITE_AFFICHAGE]:
+    lbl = "result(s)" if LANG == "en" else "resultat(s)"
+    pr(f"[cyan]{len(resultats)} {lbl} - {motif}[/cyan]")
+    for r in resultats[:LIMITE]:
         try:
             console.print(f"  {r}  {fmt_taille(r.stat().st_size)}", markup=False)
         except Exception:
             console.print(f"  {r}", markup=False)
-    if len(resultats) > LIMITE_AFFICHAGE:
-        pr(f"[dim]... {len(resultats)-LIMITE_AFFICHAGE} resultats supplementaires non affiches[/dim]")
-    log("find", f"{motif} dans {racine}")
+    if len(resultats) > LIMITE:
+        pr(f"[dim]... {len(resultats)-LIMITE} more[/dim]")
+    log("find", f"{motif} in {racine}")
 
+# ── File readers ──────────────────────────────────────────────────────────────
 def _lire_pdf(fp):
     try:
         import pdfplumber
         with pdfplumber.open(str(fp)) as pdf:
             texte = "\n".join(p.extract_text() or "" for p in pdf.pages)
-        return texte.strip() or "(PDF sans texte extractible)"
+        return texte.strip() or "(PDF without extractable text)"
     except ImportError:
-        return "(pip install pdfplumber pour lire les PDF)"
+        return "(pip install pdfplumber to read PDFs)"
     except Exception as e:
-        return f"(Erreur PDF : {e})"
+        return f"(PDF error: {e})"
 
 def _lire_docx(fp):
     try:
@@ -202,14 +417,14 @@ def _lire_docx(fp):
         doc = Document(str(fp))
         return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
     except ImportError:
-        return "(pip install python-docx pour lire les DOCX)"
+        return "(pip install python-docx to read DOCX)"
     except Exception as e:
-        return f"(Erreur DOCX : {e})"
+        return f"(DOCX error: {e})"
 
 def cmd_read(chemin, limite=100):
     fp = resoudre(chemin)
     if not fp.exists():
-        console.print(f"[red]Introuvable : {escape(str(fp))}[/red]")
+        console.print(f"[red]{t('not_found')}{escape(str(fp))}[/red]")
         return
     ext = fp.suffix.lower()
     console.print(f"[cyan]-- {escape(fp.name)} --[/cyan]")
@@ -218,33 +433,32 @@ def cmd_read(chemin, limite=100):
             texte = _lire_pdf(fp)
         elif ext == ".docx":
             texte = _lire_docx(fp)
-        elif ext in (".csv", ".json", ".md", ".html", ".htm", ".xml",
-                     ".txt", ".log", ".bat", ".py", ".js", ".ts", ".css"):
+        elif ext in (".csv",".json",".md",".html",".htm",".xml",
+                     ".txt",".log",".bat",".py",".js",".ts",".css"):
             texte = fp.read_text(encoding="utf-8", errors="replace")
         else:
-            # Tentative UTF-8 generique
             try:
                 texte = fp.read_text(encoding="utf-8", errors="replace")
             except Exception:
-                texte = f"(Format non pris en charge : {ext})"
-        # Tronque si trop long
+                texte = f"(Unsupported format: {ext})"
         lignes = texte.splitlines()
         if len(lignes) > limite:
             for l in lignes[:limite]:
                 console.print(f"  {l}", markup=False)
-            pr(f"[dim]... ({len(lignes)-limite} lignes de plus — read [fichier] [n] pour voir plus)[/dim]")
+            pr(f"[dim]... ({len(lignes)-limite} more lines -- read [file] [n])[/dim]")
         else:
             for l in lignes:
                 console.print(f"  {l}", markup=False)
-        pr("[cyan]-- fin --[/cyan]")
+        pr("[cyan]-- end --[/cyan]")
         log("read", str(fp))
     except Exception as e:
-        console.print(f"[red]Erreur : [/red]", end=""); console.print(str(e), markup=False)
+        console.print(f"[red]{t('error')}[/red]", end="")
+        console.print(str(e), markup=False)
 
 def cmd_write(chemin, contenu=None):
     fp = resoudre(chemin)
     if contenu is None:
-        pr("[dim]Saisir le contenu (terminer avec une ligne vide) :[/dim]")
+        pr("[dim]Enter content (empty line to finish):[/dim]")
         lignes = []
         try:
             while True:
@@ -253,111 +467,190 @@ def cmd_write(chemin, contenu=None):
                     break
                 lignes.append(ligne)
         except (KeyboardInterrupt, EOFError):
-            pr("[dim]Annulé.[/dim]")
+            pr(f"[dim]{t('cancelled')}[/dim]")
             return
         contenu = "\n".join(lignes)
-    if not confirmer(f"Ecraser/creer {fp}"):
+    if not confirmer(f"Overwrite/create {fp}"):
         return
     try:
         fp.write_text(contenu, encoding="utf-8")
-        console.print(f"[green]OK {escape(str(fp))}[/green]")
+        console.print(f"[green]{t('ok')} {escape(str(fp))}[/green]")
         log("write", str(fp))
     except Exception as e:
-        console.print(f"[red]Erreur : [/red]", end=""); console.print(str(e), markup=False)
+        console.print(f"[red]{t('error')}[/red]", end="")
+        console.print(str(e), markup=False)
 
+# ── Undo ──────────────────────────────────────────────────────────────────────
+def _undo_push(action, original, backup=None):
+    _undo_stack.append((action, str(original), str(backup) if backup else None))
+    if len(_undo_stack) > 20:
+        _undo_stack.pop(0)
+
+def cmd_sudo(args):
+    """Toggle or set auto-confirm mode."""
+    global _auto_confirm
+    sub = args[0].lower() if args else ""
+    if sub == "on":
+        _auto_confirm = True
+    elif sub == "off":
+        _auto_confirm = False
+    else:
+        _auto_confirm = not _auto_confirm
+
+    if _auto_confirm:
+        pr("[bold yellow]  ⚡ SUDO ON[/bold yellow][dim]  — actions auto-validees. [yellow]sudo off[/yellow] pour desactiver.[/dim]")
+    else:
+        pr("[green]  ✓ Sudo off[/green][dim]  — confirmations normales.[/dim]")
+    log("sudo", f"auto_confirm={_auto_confirm}")
+
+
+def cmd_undo():
+    if not _undo_stack:
+        pr(f"[yellow]{t('undo_empty')}[/yellow]")
+        return
+    action, original, backup = _undo_stack.pop()
+    try:
+        if action == "delete" and backup:
+            shutil.move(backup, original)
+            pr(f"[green]{t('undo_ok', name=Path(original).name)}[/green]")
+            log("undo_delete", original)
+        elif action == "move" and backup:
+            shutil.move(original, backup)
+            pr(f"[green]{t('undo_ok', name=Path(original).name)}[/green]")
+            log("undo_move", f"{original} -> {backup}")
+        elif action == "rename" and backup:
+            Path(original).rename(backup)
+            pr(f"[green]{t('undo_ok', name=Path(backup).name)}[/green]")
+            log("undo_rename", f"{original} -> {backup}")
+        else:
+            pr(f"[yellow]Cannot undo action: {action}[/yellow]")
+    except Exception as e:
+        console.print(f"[red]{t('error')}[/red]", end="")
+        console.print(str(e), markup=False)
+
+# ── Destructive ops ───────────────────────────────────────────────────────────
 def cmd_delete(chemin):
     fp = resoudre(chemin)
     if not fp.exists():
-        console.print(f"[red]Introuvable : {escape(str(fp))}[/red]")
+        console.print(f"[red]{t('not_found')}{escape(str(fp))}[/red]")
         return
-    label = "dossier" if fp.is_dir() else "fichier"
-    extra = " et tout son contenu" if fp.is_dir() else ""
-    if not confirmer(f"Supprimer {label} {escape(fp.name)}{extra}"):
+    lbl   = "folder" if fp.is_dir() else "file"
+    extra = " and all its contents" if fp.is_dir() else ""
+    if not confirmer(f"Delete {lbl} {fp.name}{extra}"):
         return
     try:
-        if fp.is_dir():
-            shutil.rmtree(str(fp))
-        else:
-            fp.unlink()
-        console.print(f"[green]Supprime : {escape(fp.name)}[/green]")
+        TRASH_DIR.mkdir(exist_ok=True)
+        trash_path = TRASH_DIR / fp.name
+        if trash_path.exists():
+            stamp = datetime.now().strftime("%H%M%S")
+            trash_path = TRASH_DIR / f"{fp.stem}_{stamp}{fp.suffix}"
+        shutil.move(str(fp), str(trash_path))
+        _undo_push("delete", fp, trash_path)
+        console.print(f"[green]{t('deleted_to_trash', name=escape(fp.name))}[/green]")
+        pr("[dim]  (undo to restore)[/dim]")
         log("delete", str(fp))
     except Exception as e:
-        console.print(f"[red]Erreur : [/red]", end=""); console.print(str(e), markup=False)
+        console.print(f"[red]{t('error')}[/red]", end="")
+        console.print(str(e), markup=False)
 
+# ── Fixed glob rename ─────────────────────────────────────────────────────────
 def _glob_to_regex(motif):
-    """Convertit un motif glob simple (*, ?) en regex avec groupe capturant."""
+    """Convert glob (*, ?) to regex with indexed named groups."""
     parts = []
+    idx   = 0
     for ch in motif:
         if ch == "*":
-            parts.append("(.*)")
+            parts.append(f"(?P<g{idx}>.*)")
+            idx += 1
         elif ch == "?":
-            parts.append("(.)")
+            parts.append(f"(?P<g{idx}>.)")
+            idx += 1
         else:
             parts.append(re.escape(ch))
-    return re.compile("^" + "".join(parts) + "$", re.IGNORECASE)
+    return re.compile("^" + "".join(parts) + "$", re.IGNORECASE), idx
 
-def _appliquer_motif(nom, pattern_src, pattern_dst):
-    """Renvoie le nouveau nom ou None si le nom ne correspond pas."""
+def _appliquer_motif(nom, pattern_src, pattern_dst, n_groups):
+    """Apply destination pattern using indexed group substitution (fixes * and ? order)."""
     m = pattern_src.match(nom)
     if not m:
         return None
-    resultat = pattern_dst
-    for i, groupe in enumerate(m.groups(), 1):
-        resultat = resultat.replace("*", groupe, 1).replace("?", groupe, 1)
-    return resultat
+    result = pattern_dst
+    for i in range(n_groups):
+        grp = m.group(f"g{i}")
+        result = re.sub(r'[*?]', lambda _: grp, result, count=1)
+    return result
 
 def cmd_rename(dossier, ancien, nouveau):
     d = resoudre(dossier)
     if not d.exists() or not d.is_dir():
-        pr(f"[red]Dossier introuvable : {d}[/red]")
+        pr(f"[red]Folder not found: {d}[/red]")
         return
-    if not confirmer(f"Renommer '{ancien}' -> '{nouveau}' dans {d.name}"):
+    if not confirmer(f"Rename '{ancien}' -> '{nouveau}' in {d.name}"):
         return
-    pattern_src = _glob_to_regex(ancien)
+    pattern_src, n_groups = _glob_to_regex(ancien)
     cibles = [e for e in d.iterdir() if pattern_src.match(e.name)]
     if not cibles:
-        pr("[yellow]Aucun fichier correspondant.[/yellow]")
+        pr("[yellow]No matching files.[/yellow]")
         return
     for c in cibles:
-        nouveau_nom = _appliquer_motif(c.name, pattern_src, nouveau)
+        nouveau_nom = _appliquer_motif(c.name, pattern_src, nouveau, n_groups)
         if not nouveau_nom:
             continue
-        dest = c.parent / nouveau_nom
+        dest     = c.parent / nouveau_nom
+        old_name = c.name
         c.rename(dest)
-        console.print(f"[green]{escape(c.name)} -> {escape(str(nouveau_nom))}[/green]")
+        _undo_push("rename", dest, c)
+        console.print(f"[green]{escape(old_name)} -> {escape(nouveau_nom)}[/green]")
         log("rename", f"{c} -> {dest}")
 
 def cmd_move(source, dest):
     src, dst = resoudre(source), resoudre(dest)
     if not src.exists():
-        console.print(f"[red]Introuvable : {escape(str(src))}[/red]")
+        console.print(f"[red]{t('not_found')}{escape(str(src))}[/red]")
         return
-    if not confirmer(f"Deplacer {src.name} vers {dst}"):
+    # Auto-create parent dirs if needed
+    # If dest looks like a file path (has suffix), ensure its parent exists
+    # If dest looks like a folder (no suffix), create it
+    dest_is_file = bool(dst.suffix)
+    dir_to_create = dst.parent if dest_is_file else dst
+    if not dir_to_create.exists():
+        try:
+            dir_to_create.mkdir(parents=True, exist_ok=True)
+            console.print(f"[dim]  Dossier créé : {escape(str(dir_to_create))}[/dim]")
+        except Exception as e:
+            console.print(f"[red]{t('error')}[/red]", end="")
+            console.print(str(e), markup=False)
+            return
+    original_dst = dst / src.name if dst.is_dir() else dst
+    if not confirmer(f"Move {src.name} to {dst}"):
         return
     try:
         shutil.move(str(src), str(dst))
+        _undo_push("move", original_dst, src)
         console.print(f"[green]{escape(src.name)} -> {escape(str(dst))}[/green]")
         log("move", f"{src} -> {dst}")
     except Exception as e:
-        console.print(f"[red]Erreur : [/red]", end=""); console.print(str(e), markup=False)
+        console.print(f"[red]{t('error')}[/red]", end="")
+        console.print(str(e), markup=False)
 
 def cmd_duplicate(source, dest=""):
     src = resoudre(source)
     if not src.exists():
-        console.print(f"[red]Introuvable : {escape(str(src))}[/red]")
+        console.print(f"[red]{t('not_found')}{escape(str(src))}[/red]")
         return
-    dst = resoudre(dest) if dest else src.parent / f"{src.stem}_copie{src.suffix}"
+    dst = resoudre(dest) if dest else src.parent / f"{src.stem}_copy{src.suffix}"
     try:
         shutil.copy2(str(src), str(dst))
-        console.print(f"[green]Copie -> {escape(str(dst))}[/green]")
+        console.print(f"[green]Copy -> {escape(str(dst))}[/green]")
         log("duplicate", f"{src} -> {dst}")
     except Exception as e:
-        console.print(f"[red]Erreur : [/red]", end=""); console.print(str(e), markup=False)
+        console.print(f"[red]{t('error')}[/red]", end="")
+        console.print(str(e), markup=False)
 
 def cmd_sort(dossier="", critere="taille", n="0"):
     dp = resoudre(dossier) if dossier else cwd
     if not dp.exists():
-        console.print(f"[red]Introuvable : {escape(str(dp))}[/red]")
+        console.print(f"[red]{t('not_found')}{escape(str(dp))}[/red]")
         return
     try:
         limit = int(n)
@@ -365,54 +658,57 @@ def cmd_sort(dossier="", critere="taille", n="0"):
         limit = 0
     fichiers = [(str(e), e.stat().st_size, e.stat().st_mtime)
                 for e in dp.iterdir() if e.is_file()]
-    fichiers.sort(key=lambda x: x[2 if critere=="date" else 1], reverse=True)
+    fichiers.sort(key=lambda x: x[2 if critere in ("date","mtime") else 1], reverse=True)
     affichage = fichiers[:limit] if limit else fichiers
     titre = f"top {limit} " if limit else ""
-    console.print(f"[cyan]{escape(str(dp))} — {titre}tri par {escape(critere)}[/cyan]")
+    console.print(f"[cyan]{escape(str(dp))} -- {titre}sort by {escape(critere)}[/cyan]")
     for chemin, taille, mtime in affichage:
         mod = datetime.fromtimestamp(mtime).strftime("%d/%m/%y")
         console.print(f"  {Path(chemin).name}  {fmt_taille(taille)}  {mod}", markup=False)
-    log("sort", f"{dp} par {critere} n={limit}")
+    log("sort", f"{dp} by {critere} n={limit}")
 
 def cmd_open(chemin=""):
     fp = resoudre(chemin) if chemin else cwd
     if not fp.exists():
-        console.print(f"[red]Introuvable : {escape(str(fp))}[/red]")
+        console.print(f"[red]{t('not_found')}{escape(str(fp))}[/red]")
         return
     try:
         os.startfile(str(fp))
-        console.print(f"[green]Ouvert : {escape(fp.name)}[/green]")
+        console.print(f"[green]Opened: {escape(fp.name)}[/green]")
         log("open", str(fp))
     except Exception as e:
-        console.print(f"[red]Erreur : [/red]", end=""); console.print(str(e), markup=False)
+        console.print(f"[red]{t('error')}[/red]", end="")
+        console.print(str(e), markup=False)
 
 def cmd_clip(chemin=""):
-    fp        = resoudre(chemin) if chemin else cwd
+    fp = resoudre(chemin) if chemin else cwd
     chemin_abs = str(fp.resolve())
     try:
-        subprocess.run(
-            "clip",
-            input=chemin_abs,
-            text=True,
-            encoding="utf-8",
-            check=True,
-            shell=False,          # pas de shell → pas d'injection
-        )
-        console.print(f"[green]Copie : {escape(chemin_abs)}[/green]")
+        subprocess.run("clip", input=chemin_abs, text=True, encoding="utf-8",
+                       check=True, shell=False)
+        console.print(f"[green]Copied: {escape(chemin_abs)}[/green]")
         log("clip", chemin_abs)
     except Exception as e:
-        console.print(f"[red]Erreur : [/red]", end=""); console.print(str(e), markup=False)
+        console.print(f"[red]{t('error')}[/red]", end="")
+        console.print(str(e), markup=False)
+
+_EXEC_MAX_LEN = 2048  # max command length
 
 def cmd_exec(commande):
-    if not confirmer(f"Executer : {commande}"):
+    # Strip null bytes and limit length
+    commande = commande.replace('\x00', '').strip()
+    if len(commande) > _EXEC_MAX_LEN:
+        pr(f"[red]Command too long (max {_EXEC_MAX_LEN} chars).[/red]")
+        return
+    if not commande:
+        return
+    if not confirmer(f"Execute: {commande}"):
         return
     with Progress(SpinnerColumn(), TextColumn("[cyan]{task.description}"), transient=True) as prog:
-        prog.add_task("Execution...")
-        result = subprocess.run(commande, shell=True, capture_output=True,
-                                cwd=str(cwd))
-    # Décode la sortie en essayant cp850 (CMD Windows) puis utf-8
+        prog.add_task("Running...")
+        result = subprocess.run(commande, shell=True, capture_output=True, cwd=str(cwd))
     def _decode(b):
-        for enc in ("cp850", "cp1252", "utf-8"):
+        for enc in ("utf-8", _enc, "cp1252", "cp850"):
             try:
                 return b.decode(enc)
             except UnicodeDecodeError:
@@ -423,20 +719,50 @@ def cmd_exec(commande):
     if stdout:
         console.print(stdout, markup=False)
     if stderr:
-        console.print("[red]Erreur : [/red]", end=""); console.print(stderr, markup=False)
+        console.print(f"[red]{t('error')}[/red]", end="")
+        console.print(stderr, markup=False)
     log("exec", commande[:200])
+
+def cmd_diff(f1, f2):
+    """Unified diff between two text files with color."""
+    p1, p2 = resoudre(f1), resoudre(f2)
+    for p in (p1, p2):
+        if not p.exists():
+            console.print(f"[red]{t('not_found')}{escape(str(p))}[/red]")
+            return
+    try:
+        a = p1.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+        b = p2.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+    except Exception as e:
+        console.print(f"[red]{t('error')}[/red]", end="")
+        console.print(str(e), markup=False)
+        return
+    diff = list(difflib.unified_diff(a, b, fromfile=p1.name, tofile=p2.name))
+    if not diff:
+        pr(f"[green]{t('diff_same')}[/green]")
+        return
+    pr(f"[cyan]{t('diff_header', a=p1.name, b=p2.name)}[/cyan]")
+    for line in diff:
+        line = line.rstrip("\n")
+        if line.startswith("+") and not line.startswith("+++"):
+            console.print(f"[green]{escape(line)}[/green]")
+        elif line.startswith("-") and not line.startswith("---"):
+            console.print(f"[red]{escape(line)}[/red]")
+        else:
+            console.print(f"[dim]{escape(line)}[/dim]")
+    log("diff", f"{p1} vs {p2}")
 
 def cmd_bookmark(action="list", nom="", chemin=""):
     bm = charger_bookmarks()
     if action == "list":
         if not bm:
-            pr("[dim]Aucun favori.[/dim]")
+            pr("[dim]No bookmarks.[/dim]")
             return
         for k, v in bm.items():
             console.print(f"  [cyan]{escape(k)}[/cyan]  {escape(v)}")
     elif action == "add":
         if not nom:
-            pr("[red]Usage : bm add [nom] [chemin?][/red]")
+            pr("[red]Usage: bm add [name] [path?][/red]")
             return
         cible = resoudre(chemin) if chemin else cwd
         bm[nom] = str(cible.resolve())
@@ -445,112 +771,361 @@ def cmd_bookmark(action="list", nom="", chemin=""):
         log("bm_add", f"{nom}={cible}")
     elif action == "remove":
         if nom not in bm:
-            console.print(f"[red]Inconnu : {escape(nom)}[/red]")
+            console.print(f"[red]Unknown: {escape(nom)}[/red]")
             return
         del bm[nom]
         sauver_bookmarks(bm)
-        console.print(f"[green]Supprime : {escape(nom)}[/green]")
+        console.print(f"[green]Removed: {escape(nom)}[/green]")
         log("bm_remove", nom)
     else:
-        pr("[red]Usage : bm [list|add|remove] [nom][/red]")
+        pr("[red]Usage: bm [list|add|remove] [name][/red]")
+
+# ── Settings ──────────────────────────────────────────────────────────────────
+def cmd_settings(args):
+    global MODEL, OLLAMA_URL, LANG, _aliases, _cfg
+    cfg = charger_config()
+
+    def _afficher():
+        cfg2 = charger_config()
+        sudo_status = "[bold yellow]ON ⚡[/bold yellow]" if _auto_confirm else "[dim]off[/dim]"
+        pr("[bold cyan]── Paramètres Fennec ──────────────────────────────[/bold cyan]")
+        console.print(f"  [cyan]lang[/cyan]        [bold]{cfg2['lang']}[/bold]   [dim](fr / en)[/dim]")
+        console.print(f"  [cyan]model[/cyan]       [bold]{cfg2['model']}[/bold]")
+        console.print(f"  [cyan]ollama_url[/cyan]  [dim]{cfg2['ollama_url']}[/dim]")
+        steps_disp = "[green]auto[/green]" if cfg2['max_steps'] == 0 else f"[yellow]{cfg2['max_steps']}[/yellow]"
+        console.print(f"  [cyan]max_steps[/cyan]   {steps_disp}   [dim](0 = auto via Qwen)[/dim]")
+        console.print(f"  [cyan]aliases[/cyan]     [bold]{len(cfg2.get('aliases', {}))}[/bold] définis")
+        console.print(f"  [cyan]sudo[/cyan]        {sudo_status}")
+        pr("[dim]  ↳ tape [bold]lang en[/bold] · [bold]model nom[/bold] · [bold]max_steps 0[/bold] · [bold]exit[/bold][/dim]")
+
+    if not args:
+        # Interactive settings mode
+        _afficher()
+        while True:
+            try:
+                console.print("[cyan]settings >[/cyan] ", end="")
+                saisie = input().strip()
+            except (KeyboardInterrupt, EOFError):
+                pr(f"\n[dim]{t('chat_back')}[/dim]")
+                return
+            if not saisie or saisie.lower() in ("exit", "quit", "q"):
+                pr(f"[dim]{t('chat_back')}[/dim]")
+                return
+            try:
+                sub_args = shlex.split(saisie)
+            except ValueError:
+                sub_args = saisie.split()
+            cmd_settings(sub_args)
+            _afficher()
+        return
+
+    key = args[0].lower()
+    val = args[1] if len(args) > 1 else ""
+
+    if key == "lang":
+        if val not in ("fr","en"):
+            pr("[red]Lang must be: fr or en[/red]")
+            return
+        cfg["lang"] = val
+        LANG = val
+    elif key == "model":
+        if not val:
+            r = subprocess.run("ollama list", shell=True, capture_output=True, text=True)
+            console.print(r.stdout, markup=False)
+            return
+        cfg["model"] = val
+        MODEL = val
+    elif key == "ollama_url":
+        cfg["ollama_url"] = val
+        OLLAMA_URL = val
+    elif key == "max_steps":
+        try:
+            cfg["max_steps"] = max(0, int(val))
+        except ValueError:
+            pr("[red]max_steps must be an integer (0 = auto)[/red]")
+            return
+    else:
+        pr(f"[red]Unknown setting: {key}[/red]")
+        pr("[dim]Available: lang, model, ollama_url, max_steps[/dim]")
+        return
+
+    sauver_config(cfg)
+    _cfg = cfg
+    pr(f"[green]{t('settings_saved')}[/green]")
+    log("settings", f"{key}={val}")
+
+# ── Alias ─────────────────────────────────────────────────────────────────────
+def cmd_alias(args):
+    global _aliases
+    cfg = charger_config()
+    als = cfg.get("aliases", {})
+
+    if not args or args[0] == "list":
+        if not als:
+            pr(f"[dim]{t('alias_none')}[/dim]")
+            return
+        pr(f"[cyan]{t('alias_list')}[/cyan]")
+        for k, v in als.items():
+            console.print(f"  [bold]{escape(k)}[/bold]  ->  {escape(v)}")
+        return
+
+    if args[0] == "add" and len(args) >= 3:
+        k, v = args[1], " ".join(args[2:])
+        als[k] = v
+        cfg["aliases"] = als
+        sauver_config(cfg)
+        _aliases = als
+        pr(f"[green]{t('alias_added', k=k, v=v)}[/green]")
+        log("alias_add", f"{k}={v}")
+    elif args[0] == "remove" and len(args) >= 2:
+        k = args[1]
+        if k not in als:
+            pr(f"[red]Unknown alias: {k}[/red]")
+            return
+        del als[k]
+        cfg["aliases"] = als
+        sauver_config(cfg)
+        _aliases = als
+        pr(f"[green]{t('alias_removed', k=k)}[/green]")
+        log("alias_remove", k)
+    else:
+        pr("[red]Usage: alias list | alias add [name] [cmd] | alias remove [name][/red]")
+
+# ── Agent tool executor ───────────────────────────────────────────────────────
+def _resoudre_args_agent(cmd, args):
+    """Resolve relative paths to absolute for agent tool calls.
+    If Qwen passes just a filename, look it up in Downloads and Desktop first.
+    Also fixes hallucinated sub-paths like Desktop\\bureau\\X -> Desktop\\X."""
+    FILE_CMDS = {"move", "delete", "read", "open", "clip", "duplicate", "rename"}
+    if cmd not in FILE_CMDS or not args:
+        return args
+    home = Path.home()
+    desktop = home / "Desktop"
+    search_dirs = [cwd, home / "Downloads", desktop, home / "Documents"]
+
+    def _sanitize(arg, is_dest=False):
+        p = Path(arg)
+        # Strip hallucinated \bureau\ segment that Qwen sometimes adds
+        parts = p.parts
+        new_parts = []
+        skip_next = False
+        for i, part in enumerate(parts):
+            if skip_next:
+                skip_next = False
+                continue
+            # If previous part is Desktop and current is "bureau", skip "bureau"
+            if new_parts and Path(new_parts[-1]).name.lower() == "desktop" and part.lower() == "bureau":
+                skip_next = False
+                continue
+            new_parts.append(part)
+        if new_parts != list(parts):
+            p = Path(*new_parts) if len(new_parts) > 1 else Path(new_parts[0])
+
+        if p.is_absolute():
+            return str(p)
+        if is_dest:
+            return str(p)
+        # Relative — search for it
+        for d in search_dirs:
+            candidate = d / p.name
+            if candidate.exists():
+                return str(candidate)
+        return str(p)
+
+    resolved = []
+    for i, arg in enumerate(args):
+        is_dest = (cmd == "move" and i == len(args) - 1)
+        resolved.append(_sanitize(arg, is_dest=is_dest))
+    return resolved
+
 
 def _executer_outil(cmd, args):
-    """Execute un outil et capture + affiche sa sortie."""
-    global console  # déclaré en tête de fonction, avant toute utilisation
+    """Execute a Fennec tool and capture its output for the agent.
+    Uses a local Console buffer. The global swap is safe in this single-threaded
+    synchronous application — the finally block guarantees restoration."""
+    global console  # declared first — required by Python before any use
 
-    # exec : capture subprocess directement (pas besoin de Console)
+    global _agent_mode
+    # Auto-resolve relative paths Qwen might pass
+    args = _resoudre_args_agent(cmd, args)
+
     if cmd == "exec":
-        commande = " ".join(args)
+        commande = " ".join(args).replace('\x00', '').strip()
+        if len(commande) > _EXEC_MAX_LEN:
+            return "(command too long, refused)"
         result = subprocess.run(commande, shell=True, capture_output=True,
                                 text=True, encoding=_enc, errors="replace", cwd=str(cwd))
         out = (result.stdout + result.stderr).strip()
         if out:
             console.print(out[:500], markup=False)
         log("agent_exec", commande[:200])
-        return out[:1000] if out else "(pas de sortie)"
+        return out[:1000] if out else "(no output)"
 
-    # Autres commandes : Console temporaire dédiée au buffer
-    buf      = io.StringIO()
-    cap      = Console(file=buf, highlight=False, width=120, markup=False)
+    buf = io.StringIO()
+    cap = Console(file=buf, highlight=False, width=120, markup=False)
 
-    # On substitue localement la référence dans le module courant
-    _ancien_console = console
-    console = cap
+    _prev       = console
+    console     = cap
+    _agent_mode = True
     try:
         dispatcher(cmd, args)
     finally:
-        console = _ancien_console          # restauration garantie
+        console     = _prev
+        _agent_mode = False
 
     sortie = buf.getvalue().strip()
     if sortie:
         for ligne in sortie.splitlines()[:30]:
-            _ancien_console.print(f"  {ligne}", markup=False)
+            _prev.print(f"  {ligne}", markup=False)
     log("agent_tool", f"{cmd} {args}")
-    return sortie[:1500] if sortie else "(commande executee)"
+    return sortie[:1500] if sortie else "(command executed)"
 
+# ── Dynamic step estimation ───────────────────────────────────────────────────
+_MAX_STEPS_ABSOLU = 20
 
+def _estimer_steps(instruction: str) -> int:
+    """Ask Qwen to estimate max steps needed. Fallback to 6."""
+    if LANG == "en":
+        prompt = (
+            "How many tool-use steps maximum does this Windows PC task require? "
+            "Reply with a SINGLE INTEGER between 1 and 20, nothing else.\n\n"
+            f"Task: {instruction}"
+        )
+    else:
+        prompt = (
+            "Combien d'etapes outils maximum necessite cette tache sur un PC Windows ? "
+            "Reponds UNIQUEMENT avec un entier entre 1 et 20, rien d'autre.\n\n"
+            f"Tache : {instruction}"
+        )
+    raw = appel_chat([{"role": "user", "content": prompt}])
+    try:
+        n = int(re.search(r'\d+', raw).group())
+        return max(3, min(n + 2, _MAX_STEPS_ABSOLU))  # +2 buffer for unexpected steps
+    except Exception:
+        return 8
+
+# ── Agent ─────────────────────────────────────────────────────────────────────
 def cmd_agent(instruction):
-    """Agent ReAct : Qwen raisonne, agit, observe, recommence."""
+    """ReAct agent: Qwen reasons, acts, observes, repeats."""
     if not verifier_ollama():
         return
 
     home      = Path.home()
     bureau    = home / "Desktop"
     downloads = home / "Downloads"
-    MAX_STEPS = 8
 
-    system = (
-        "Tu es un assistant Windows. Pour agir, utilise UNIQUEMENT ces outils Fennec.\n"
-        "JAMAIS de commandes Windows dans le champ cmd. Uniquement les noms d'outils ci-dessous.\n"
-        "REGLES : fais le minimum d'etapes. Ne jamais ouvrir/lire sans demande explicite.\n"
-        "Si echec, dis-le dans done. Arrete-toi des que la tache est accomplie.\n\n"
-        "Outils disponibles (cmd = exactement ce nom) :\n"
-        "  list      args:[dossier]                  -> liste fichiers et dossiers\n"
-        "  find      args:[motif_glob, dossier]       -> cherche ex: *.pdf\n"
-        "  sort      args:[dossier, taille|date]      -> trie par taille ou date\n"
-        "  read      args:[fichier]                   -> lit un fichier\n"
-        "  open      args:[chemin]                    -> ouvre avec l'app associee\n"
-        "  exec      args:[commande_windows_complete] -> execute une commande Windows\n"
-        "  delete    args:[fichier]                   -> supprime\n"
-        "  move      args:[source, destination]       -> deplace\n"
-        "  duplicate args:[source]                    -> copie\n"
-        "  clip      args:[chemin]                    -> chemin dans presse-papier\n\n"
-        "Format OBLIGATOIRE a chaque etape :\n"
-        "{\"action\":\"tool\",\"cmd\":\"<NOM_OUTIL>\",\"args\":[\"arg1\"],\"reason\":\"...\"}\n"
-        "Quand tu as la reponse finale :\n"
-        "{\"action\":\"done\",\"answer\":\"ta reponse\"}\n\n"
-        "EXEMPLES CORRECTS :\n"
-        f"  liste bureau -> {{\"action\":\"tool\",\"cmd\":\"list\",\"args\":[\"{bureau}\"],\"reason\":\"lister\"}}\n"
-        f"  trouve pdfs  -> {{\"action\":\"tool\",\"cmd\":\"find\",\"args\":[\"*.pdf\",\"{bureau}\"],\"reason\":\"chercher\"}}\n"
-        f"  trie downloads -> {{\"action\":\"tool\",\"cmd\":\"sort\",\"args\":[\"{downloads}\",\"taille\"],\"reason\":\"trier\"}}\n"
-        "  commande libre -> {\"action\":\"tool\",\"cmd\":\"exec\",\"args\":[\"dir C:\\\\Windows\"],\"reason\":\"...\"}\n\n"
-        f"Chemins reels : bureau={bureau}  downloads={downloads}  cwd={cwd}\n"
-    )
+    # Sudo mode: unlimited steps (capped at absolute max)
+    if _auto_confirm:
+        max_steps = _MAX_STEPS_ABSOLU
+        console.print(f"[dim][bold yellow]SUDO[/bold yellow] — {t('agent_complexity', n=max_steps)}[/dim]")
+    else:
+        fixed = _cfg.get("max_steps", 0)
+        if fixed > 0:
+            max_steps = fixed
+            console.print(f"[dim]{t('agent_complexity', n=max_steps)}[/dim]")
+        else:
+            with Progress(SpinnerColumn(), TextColumn(f"[cyan]{t('agent_estimating')}"),
+                          transient=True) as prog:
+                prog.add_task("")
+                max_steps = _estimer_steps(instruction)
+            console.print(f"[dim]{t('agent_complexity', n=max_steps)}[/dim]")
+
+    if LANG == "en":
+        system = (
+            "You are a Windows assistant. To act, use ONLY these Fennec tools.\n"
+            "NEVER use Windows commands in the cmd field. Only the exact tool names below.\n"
+            "CRITICAL RULES:\n"
+            "- move accepts ONE source file per call. NEVER semicolons or lists in args.\n"
+            "- To move N files: make N separate move calls, one file at a time.\n"
+            "- To create a folder: exec args:[cmd /c mkdir path]. Do this BEFORE moving files into it.\n"
+            "- Desktop path is exactly as shown below. Never invent subfolders.\n"
+"- ALWAYS use full ABSOLUTE paths in args (e.g. C:\\Users\\...\\file.ext).\n"
+"- NEVER pass just a filename without its full path.\n"
+            "- Minimum steps. Never open/read without explicit request.\n"
+            "- If failure, report it in done. Stop as soon as task is complete.\n"
+            "- If the task needs more steps than planned (e.g. moving several files one by one),"
+" add \"need_more\":true in EACH tool reply until ALL files are processed.\n\n"
+            "Available tools (cmd = exactly this name):\n"
+            "  list      args:[folder]               -> list files and folders\n"
+            "  find      args:[glob_pattern, folder] -> search e.g. *.pdf\n"
+            "  sort      args:[folder, size|date]    -> sort by size or date\n"
+            "  read      args:[file]                 -> read a file\n"
+            "  open      args:[path]                 -> open with associated app\n"
+            "  exec      args:[full_windows_command] -> run a Windows command\n"
+            "  delete    args:[file]                 -> delete (moves to trash)\n"
+            "  move      args:[source_path, destination_path] -> move ONE file (if dest ends with a new filename, also renames)\n"
+"    e.g. rename+move: move [Downloads\\old.mp4, Desktop\\AXA\\new_name.mp4]\n"
+            "  duplicate args:[source]               -> copy\n"
+            "  clip      args:[path]                 -> copy path to clipboard\n\n"
+            "REQUIRED format at each step:\n"
+            "{\"action\":\"tool\",\"cmd\":\"<TOOL>\",\"args\":[\"arg1\"],\"reason\":\"...\"}\n"
+            "When you have the final answer:\n"
+            "{\"action\":\"done\",\"answer\":\"your answer\"}\n\n"
+            f"EXACT paths (use as-is): desktop={bureau}  downloads={downloads}  cwd={cwd}\n"
+            f"WARNING: desktop is {bureau}, not {bureau}\\bureau nor {bureau}\\Desktop.\n"
+        )
+    else:
+        system = (
+            "Tu es un assistant Windows. Pour agir, utilise UNIQUEMENT ces outils Fennec.\n"
+            "JAMAIS de commandes Windows dans le champ cmd. Uniquement les noms d'outils ci-dessous.\n"
+            "REGLES CRITIQUES :\n"
+            "- move accepte UN seul fichier source par appel. JAMAIS de liste ou point-virgule.\n"
+            "- Pour deplacer N fichiers : N appels move separes, un par fichier.\n"
+            "- Pour creer un dossier : exec args:[cmd /c mkdir chemin]. Le faire AVANT de deplacer dedans.\n"
+            "- Le chemin du bureau est exactement celui indique ci-dessous. Ne pas inventer de sous-dossiers.\n"
+            "- TOUJOURS utiliser les chemins ABSOLUS complets dans les args (ex: C:\\Users\\...\\fichier.ext).\n"
+            "- JAMAIS passer seulement un nom de fichier sans son chemin complet.\n"
+            "- Minimum d'etapes. Ne jamais ouvrir/lire sans demande explicite.\n"
+            "- Si echec, le dire dans done. S'arreter des que la tache est finie.\n"
+            "- Si la tache necessite plus d'etapes que prevu (ex: deplacer plusieurs fichiers un par un),"
+            " ajoute \"need_more\":true dans CHAQUE reponse tool jusqu'a avoir fini TOUS les fichiers.\n\n"
+            "Outils disponibles (cmd = exactement ce nom) :\n"
+            "  list      args:[dossier]                  -> liste fichiers et dossiers\n"
+            "  find      args:[motif_glob, dossier]       -> cherche ex: *.pdf\n"
+            "  sort      args:[dossier, taille|date]      -> trie par taille ou date\n"
+            "  read      args:[fichier]                   -> lit un fichier\n"
+            "  open      args:[chemin]                    -> ouvre avec l'app associee\n"
+            "  exec      args:[commande_windows_complete] -> execute une commande Windows\n"
+            "  delete    args:[fichier]                   -> supprime (vers corbeille)\n"
+            "  move      args:[chemin_source, chemin_destination] -> deplace ET renomme si le chemin dest a un nouveau nom\n"
+            "    TOUJOURS renommer avec un nom descriptif en francais/anglais coherent\n"
+            "    ex: [C:\\Downloads\\IMG_3677.MOV, C:\\Desktop\\AXA\\video_beach_aout2025.mov]\n"
+            "  duplicate args:[source]                    -> copie\n"
+            "  clip      args:[chemin]                    -> chemin dans presse-papier\n\n"
+            "Format OBLIGATOIRE a chaque etape :\n"
+            "{\"action\":\"tool\",\"cmd\":\"<OUTIL>\",\"args\":[\"arg1\"],\"reason\":\"...\"}\n"
+            "Quand tu as la reponse finale :\n"
+            "{\"action\":\"done\",\"answer\":\"ta reponse\"}\n\n"
+            f"Chemins EXACTS (utilise-les tels quels) : bureau={bureau}  downloads={downloads}  cwd={cwd}\n"
+            f"ATTENTION : le bureau est {bureau}, pas {bureau}\\bureau ni {bureau}\\Desktop.\n"
+        )
 
     messages = [
-        {"role": "system",  "content": system},
-        {"role": "user",    "content": instruction},
+        {"role": "system", "content": system},
+        {"role": "user",   "content": instruction},
     ]
+    pr(f"  [dim]{'─'*54}[/dim]")
+    console.print(f"  [cyan]Agent[/cyan]  {escape(instruction)}")
+    pr(f"  [dim]{'─'*54}[/dim]")
 
-    console.print(f"[dim]Agent : {escape(instruction)}[/dim]")
-
-    for etape in range(1, MAX_STEPS + 1):
-        with Progress(SpinnerColumn(), TextColumn(f"[cyan]Qwen reflechit... (etape {etape}/{MAX_STEPS})"),
+    etape = 0
+    while etape < max_steps:
+        etape += 1
+        with Progress(SpinnerColumn(),
+                      TextColumn(f"[cyan]{t('agent_thinking', s=etape, m=max_steps)}"),
                       transient=True) as prog:
             prog.add_task("")
             raw = appel_chat(messages, fmt_json=True)
 
         if not raw:
-            pr("[yellow]Pas de reponse de Qwen.[/yellow]")
+            pr(f"[yellow]{t('no_reply')}[/yellow]")
             break
 
-        # Parse JSON
         try:
             debut = raw.find("{")
             fin   = raw.rfind("}") + 1
             data  = json.loads(raw[debut:fin])
         except (json.JSONDecodeError, ValueError):
-            # Reponse texte brute -> fin
             pr("[cyan]Qwen >[/cyan]")
             for ligne in raw.splitlines():
                 console.print(f"  {ligne}", markup=False)
@@ -559,233 +1134,114 @@ def cmd_agent(instruction):
 
         action = data.get("action", "tool")
 
-        # Reponse finale — refusee si aucun outil n'a encore ete utilise
+        # Dynamic extension
+        if data.get("need_more") and max_steps < _MAX_STEPS_ABSOLU:
+            max_steps = min(max_steps + 3, _MAX_STEPS_ABSOLU)
+            console.print(f"[dim]{t('agent_extended', n=max_steps)}[/dim]")
+
         if action == "done":
             if etape == 1:
                 messages.append({"role": "assistant", "content": raw})
-                messages.append({"role": "user", "content":
-                    "NON. Tu ne peux pas repondre sans avoir utilise au moins un outil. "
-                    "Utilise d'abord list, find, sort ou exec pour obtenir les vraies donnees du PC. "
-                    "Reponds avec {\"action\":\"tool\",...} maintenant."})
+                messages.append({"role": "user", "content": t("agent_no_tool_first")})
                 continue
             answer = data.get("answer", "")
             if answer:
-                pr(f"[bold cyan]Qwen >[/bold cyan]")
+                pr(f"  [dim]{'─'*54}[/dim]")
+                pr("[bold green]  ✓ Qwen[/bold green]")
                 for ligne in answer.splitlines():
-                    console.print(f"  {ligne}", markup=False)
+                    console.print(f"    {ligne}", markup=False)
                 log("agent_done", answer[:200])
             break
 
-        # Execution d'un outil
         cmd  = data.get("cmd", "")
         args = [str(a) for a in data.get("args", [])]
         reason = data.get("reason", "")
 
         if not cmd:
-            pr("[yellow]Qwen n'a pas specifie de commande.[/yellow]")
+            pr(f"[yellow]{t('agent_no_cmd')}[/yellow]")
             break
 
-        _info = f"[dim]  [{etape}] {escape(str(cmd))}({escape(', '.join(args))})" + (f"  — {escape(str(reason))}" if reason else "") + "[/dim]"
-        console.print(_info)
+        step_color = "yellow" if _auto_confirm else "cyan"
+        info = (f"[{step_color}]  [{etape}][/{step_color}] [bold]{escape(str(cmd))}[/bold]"
+                f"[dim]({escape(', '.join(args))})"
+                + (f"  — {escape(str(reason))}" if reason else "") + "[/dim]")
+        console.print(info)
 
-        # Confirmation pour actions dangereuses
-        if cmd in ("delete", "move", "rename"):
-            if not confirmer(f"Agent veut {cmd} {args}"):
+        if cmd in ("delete","move","rename"):
+            if not confirmer(f"Agent wants to {cmd} {args}"):
                 messages.append({"role": "assistant", "content": raw})
-                messages.append({"role": "user",      "content": "Action refusee par l'utilisateur. Propose autre chose."})
+                messages.append({"role": "user", "content": t("agent_refused")})
                 continue
 
-        # Commandes reconnues uniquement — sinon on force exec
         if cmd not in AGENT_CMDS_VALIDES:
-            pr(f"[dim]  -> commande inconnue, bascule vers exec[/dim]")
-            cmd_reel = "exec"
+            pr(f"[dim]  -> unknown command, falling back to exec[/dim]")
+            cmd_reel  = "exec"
             args_reel = [cmd + (" " + " ".join(args) if args else "")]
         else:
             cmd_reel, args_reel = cmd, args
 
         sortie = _executer_outil(cmd_reel, args_reel)
 
-        # Feedback enrichi pour le prochain tour
         messages.append({"role": "assistant", "content": raw})
-        if not sortie or sortie == "(commande executee)":
-            feedback = f"Commande {cmd_reel} executee avec succes."
+        if not sortie or sortie in ("(command executed)", "(commande executee)"):
+            feedback = f"Command {cmd_reel} executed successfully."
         else:
-            feedback = f"Resultat de {cmd_reel}:\n{sortie}"
+            feedback = f"Result of {cmd_reel}:\n{sortie}"
 
-        # Apres delete/move/rename reussi -> forcer done immediatement
-        if cmd_reel in ("delete", "move", "rename") and "Erreur" not in sortie:
-            feedback += "\nTache accomplie. Reponds maintenant avec {\"action\":\"done\",\"answer\":\"<confirmation courte>\"}."
+        # Remind Qwen to keep going if the original task isn't finished
+        steps_left = max_steps - etape
+        if steps_left <= 3 and steps_left > 0:
+            reminder = (
+                f" You have {steps_left} steps left. If you are not done yet, add \"need_more\":true NOW."
+                if LANG == "en" else
+                f" Il te reste {steps_left} etapes. Si tu n'as pas fini, ajoute \"need_more\":true MAINTENANT."
+            )
+            feedback += reminder
 
         messages.append({"role": "user", "content": feedback})
-        log("agent_step", f"etape={etape} cmd={cmd} args={args}")
-
+        log("agent_step", f"step={etape} cmd={cmd} args={args}")
     else:
-        pr(f"[yellow]Limite de {MAX_STEPS} etapes atteinte.[/yellow]")
+        pr(f"[yellow]{t('agent_limit', n=max_steps)}[/yellow]")
 
-# Mots-clés qui indiquent un besoin de données en temps réel
+# ── Web helpers ───────────────────────────────────────────────────────────────
 _WEB_KEYWORDS = {
-    "météo", "meteo", "temperature", "température", "temps", "pluie", "soleil", "vent",
-    "actualité", "actualite", "news", "aujourd'hui", "maintenant", "ce soir", "cette semaine",
-    "prix", "tarif", "cours", "bourse", "bitcoin", "euro", "dollar",
-    "score", "résultat", "résultats", "match", "classement",
-    "horaire", "horaires", "ouvert", "fermé", "ferme",
-    "trafic", "embouteillage", "grève", "greve",
-    "sortie", "film", "concert", "événement", "evenement",
+    "meteo","météo","temperature","température","temps","pluie","soleil","vent",
+    "weather","forecast","rain","wind",
+    "actualite","actualité","news","aujourd'hui","maintenant","ce soir","cette semaine",
+    "today","tonight","this week","breaking",
+    "prix","tarif","cours","bourse","bitcoin","euro","dollar","price","stock",
+    "score","résultat","résultats","match","classement","result","standings",
+    "horaire","horaires","ouvert","fermé","ferme","hours","opening hours",
+    "trafic","embouteillage","greve","grève","traffic","strike",
+    "sortie","film","concert","evenement","événement","movie","event",
 }
 
 def _besoin_web(texte):
-    """Retourne True si la question semble nécessiter des données en temps réel."""
-    t = texte.lower()
-    return any(kw in t for kw in _WEB_KEYWORDS)
+    t_low = texte.lower()
+    return any(kw in t_low for kw in _WEB_KEYWORDS)
 
 def _web_context(query):
-    """Scrape DuckDuckGo et retourne un résumé à injecter dans le contexte du chat."""
     try:
         resultats = _scrape_ddg(query)
         if not resultats:
             return ""
-        parties = [f"- {titre} : {extrait[:200]}" for titre, lien, extrait in resultats[:4] if extrait]
-        return ("Données web récupérées :\n" + "\n".join(parties)) if parties else ""
+        parties = [f"- {titre}: {extrait[:200]}"
+                   for titre, lien, extrait in resultats[:4] if extrait]
+        return ("Web data:\n" + "\n".join(parties)) if parties else ""
     except Exception:
         return ""
 
-
-def cmd_chat():
-    if not verifier_ollama():
-        return
-    pr("[green]-- Chat Qwen2.5  (exit pour quitter) --[/green]")
-    historique = [
-        {"role": "system", "content":
-         "Tu es un assistant personnel utile et concis. RÈGLE ABSOLUE : réponds EXCLUSIVEMENT en français, sans exception. Jamais de chinois, d'anglais ou d'autre langue. Quand un [Contexte web] est fourni dans le message, utilise-le pour répondre avec précision. Sans contexte web, si tu ne connais pas une donnée en temps réel (météo, prix, score...), dis-le clairement et suggère d'utiliser la commande search. Ne jamais inventer des chiffres."}
-    ]
-    # Commandes Fennec directement exécutables depuis le chat
-    CMDS_DIRECTES = {"search", "download", "install", "uninstall", "find",
-                     "list", "ls", "read", "cat", "open", "exec", "clip",
-                     "sort", "cd", "bm", "bookmark", "logs", "helpchat"}
-
-    while True:
-        try:
-            console.print("[green]toi >[/green] ", end="")
-            saisie = input().strip()
-        except KeyboardInterrupt:
-            pr("\n[dim]Retour a Fennec.[/dim]")
-            break
-        except EOFError:
-            break
-        if not saisie:
-            continue
-        if saisie.lower() in ("exit", "quit"):
-            pr("[dim]Retour a Fennec.[/dim]")
-            break
-
-        # Détection commande Fennec -> exécution directe sans passer par Qwen
-        try:
-            tokens = shlex.split(saisie, posix=False)
-        except ValueError:
-            tokens = saisie.split()
-        tokens = [t.strip("\"'") for t in tokens]
-        if tokens and tokens[0].lower() in CMDS_DIRECTES:
-            pr(f"[dim]-> commande Fennec détectée, exécution directe[/dim]")
-            dispatcher(tokens[0].lower(), tokens[1:])
-            continue
-
-        # Enrichissement web si la question porte sur des données en temps réel
-        contenu_user = saisie
-        if _besoin_web(saisie):
-            with Progress(SpinnerColumn(), TextColumn("[cyan]Recherche web..."), transient=True) as prog:
-                prog.add_task("")
-                ctx = _web_context(saisie)
-            if ctx:
-                contenu_user = saisie + "\n\n[Contexte web]\n" + ctx
-                pr("[dim]  (données web injectées)[/dim]")
-            else:
-                pr("[dim]  (pas de résultat web, Qwen répond de mémoire)[/dim]")
-        historique.append({"role": "user", "content": contenu_user})
-        with Progress(SpinnerColumn(), TextColumn("[cyan]Qwen..."), transient=True) as prog:
-            prog.add_task("")
-            reponse = appel_chat(historique[-10:])
-        if not reponse:
-            pr("[dim]Pas de reponse. Retente.[/dim]")
-            historique.pop()
-            continue
-        historique.append({"role": "assistant", "content": reponse})
-        pr("[cyan]Qwen >[/cyan]")
-        for ligne in reponse.splitlines():
-            console.print(f"  {ligne}", markup=False)
-        log("chat", saisie[:100])
-
-GEEK_EXE = BASE_DIR / "geek.exe"
-
-def cmd_uninstall(nom):
-    """Desinstalle un programme via winget puis ouvre Geek Uninstaller pour nettoyer les restes."""
-    if not nom:
-        pr("[red]Usage: uninstall [nom du programme][/red]")
-        return
-
-    # Recherche dans la liste winget pour confirmer le nom exact
-    console.print(f"[cyan]Recherche de '{escape(nom)}' dans winget...[/cyan]")
-    result = subprocess.run(
-        ["winget", "list", "--name", nom],
-        capture_output=True, text=True, encoding="utf-8", errors="replace"
-    )
-    lignes = [l for l in result.stdout.splitlines() if nom.lower() in l.lower()]
-    if not lignes:
-        console.print(f"[yellow]Aucun programme correspondant a '{escape(nom)}' dans winget.[/yellow]")
-        pr("[dim]Essaie avec un nom plus court ou verifie dans : exec winget list[/dim]")
-        return
-
-    pr(f"[cyan]Programmes trouves :[/cyan]")
-    for l in lignes:
-        console.print(f"  {l}", markup=False)
-
-    if not confirmer(f"Desinstaller '{nom}' via winget ?"):
-        return
-
-    pr(f"[cyan]Desinstallation en cours...[/cyan]")
-    with Progress(SpinnerColumn(), TextColumn("[cyan]Desinstallation..."), transient=True) as prog:
-        prog.add_task("")
-        result = subprocess.run(
-            ["winget", "uninstall", "--name", nom, "--silent"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace"
-        )
-
-    if result.stdout:
-        console.print(result.stdout.strip(), markup=False)
-    if result.returncode != 0 and result.stderr:
-        console.print("[red]Erreur : [/red]", end=""); console.print(result.stderr.strip(), markup=False)
-        log("uninstall_error", f"{nom} : {result.stderr[:200]}")
-        return
-
-    console.print(f"[green]'{escape(nom)}' desinstalle.[/green]")
-    log("uninstall", nom)
-
-    # Nettoyage des restes avec Geek Uninstaller si disponible
-    if GEEK_EXE.exists():
-        pr(f"[cyan]Ouverture de Geek Uninstaller pour nettoyer les restes...[/cyan]")
-        pr(f"[dim]  -> Fais clic droit sur le programme puis 'Scan for Leftovers'[/dim]")
-        try:
-            ctypes.windll.shell32.ShellExecuteW(
-                None, "runas", str(GEEK_EXE), None, str(BASE_DIR), 1
-            )
-            log("geek_uninstaller", nom)
-        except Exception as e:
-            console.print("[red]Impossible de lancer Geek Uninstaller : [/red]", end=""); console.print(str(e), markup=False)
-    else:
-        pr(f"[yellow]Conseil : place geek.exe a cote de fennec.py pour nettoyer les restes.[/yellow]")
-        pr(f"[dim]  Telecharge sur https://geekuninstaller.com (gratuit, portable)[/dim]")
-
-
 def _scrape_ddg(terme):
-    """Scrape DuckDuckGo HTML et retourne une liste de (titre, lien, extrait)."""
+    import ssl as _ssl
     html_mod = _html
     url = f"https://html.duckduckgo.com/html/?q={urllib.request.quote(terme)}"
     req = urllib.request.Request(url, headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-        "Accept-Language": "fr-FR,fr;q=0.9",
+        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
     })
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    ctx = _ssl.create_default_context()
+    with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
         html_content = resp.read().decode("utf-8", errors="replace")
-
     titres   = re.findall(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html_content)
     extraits = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', html_content)
     resultats = []
@@ -802,22 +1258,134 @@ def _scrape_ddg(terme):
         resultats.append((titre_propre, lien, extrait_propre))
     return resultats
 
+# ── Chat (streaming) ──────────────────────────────────────────────────────────
+def cmd_chat():
+    if not verifier_ollama():
+        return
+    pr(f"[green]{t('chat_header')}[/green]")
+
+    lang_rule = (
+        "ABSOLUTE RULE: respond EXCLUSIVELY in English, no exceptions."
+        if LANG == "en" else
+        "REGLE ABSOLUE : reponds EXCLUSIVEMENT en francais, sans exception."
+    )
+    historique = [
+        {"role": "system", "content":
+         f"You are a helpful concise personal assistant. {lang_rule} "
+         "When a [Web context] is provided in the message, use it to answer precisely. "
+         "Without web context, if you do not know a real-time value (weather, prices, scores), "
+         "say so and suggest using the search command. Never invent numbers."}
+    ]
+    CMDS_DIRECTES = {"search","download","install","uninstall","find","list","ls",
+                     "read","cat","open","exec","clip","sort","cd","bm","bookmark",
+                     "logs","helpchat","diff","undo","settings","alias"}
+
+    while True:
+        try:
+            if _session:
+                saisie = _session.prompt(HTML(f"<prompt>{t('chat_you')} </prompt>")).strip()
+            else:
+                console.print(f"[green]{t('chat_you')}[/green] ", end="")
+                saisie = input().strip()
+        except KeyboardInterrupt:
+            pr(f"\n[dim]{t('chat_back')}[/dim]")
+            break
+        except EOFError:
+            break
+        if not saisie:
+            continue
+        if saisie.lower() in ("exit","quit","q"):
+            pr(f"[dim]{t('chat_back')}[/dim]")
+            break
+
+        try:
+            tokens = shlex.split(saisie, posix=False)
+        except ValueError:
+            tokens = saisie.split()
+        tokens = [tok.strip("\"'") for tok in tokens]
+        if tokens and tokens[0].lower() in CMDS_DIRECTES:
+            pr(f"[dim]{t('cmd_detected')}[/dim]")
+            dispatcher(tokens[0].lower(), tokens[1:])
+            continue
+
+        contenu_user = saisie
+        if _besoin_web(saisie):
+            with Progress(SpinnerColumn(), TextColumn("[cyan]Web search..."), transient=True) as prog:
+                prog.add_task("")
+                ctx = _web_context(saisie)
+            if ctx:
+                contenu_user = saisie + "\n\n[Web context]\n" + ctx
+                pr(f"[dim]{t('web_injected')}[/dim]")
+            else:
+                pr(f"[dim]{t('web_none')}[/dim]")
+
+        historique.append({"role": "user", "content": contenu_user})
+        console.print("[cyan]Qwen >[/cyan] ", end="")
+        reponse = appel_chat_stream(historique[-10:])
+        if not reponse:
+            pr(f"[dim]{t('no_reply')}[/dim]")
+            historique.pop()
+            continue
+        historique.append({"role": "assistant", "content": reponse})
+        log("chat", saisie[:100])
+
+# ── Install / search ──────────────────────────────────────────────────────────
+def cmd_uninstall(nom):
+    if not nom:
+        pr("[red]Usage: uninstall [program name][/red]")
+        return
+    console.print(f"[cyan]Looking for '{escape(nom)}' in winget...[/cyan]")
+    result = subprocess.run(["winget","list","--name",nom],
+                            capture_output=True, text=True, encoding="utf-8", errors="replace")
+    lignes = [l for l in result.stdout.splitlines() if nom.lower() in l.lower()]
+    if not lignes:
+        console.print(f"[yellow]No match for '{escape(nom)}' in winget.[/yellow]")
+        pr("[dim]Try a shorter name or: exec winget list[/dim]")
+        return
+    pr("[cyan]Found:[/cyan]")
+    for l in lignes:
+        console.print(f"  {l}", markup=False)
+    if not confirmer(f"Uninstall '{nom}' via winget?"):
+        return
+    pr("[cyan]Uninstalling...[/cyan]")
+    with Progress(SpinnerColumn(), TextColumn("[cyan]Uninstalling..."), transient=True) as prog:
+        prog.add_task("")
+        result = subprocess.run(["winget","uninstall","--name",nom,"--silent"],
+                                capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if result.stdout:
+        console.print(result.stdout.strip(), markup=False)
+    if result.returncode != 0 and result.stderr:
+        console.print(f"[red]{t('error')}[/red]", end="")
+        console.print(result.stderr.strip(), markup=False)
+        log("uninstall_error", f"{nom}: {result.stderr[:200]}")
+        return
+    console.print(f"[green]'{escape(nom)}' uninstalled.[/green]")
+    log("uninstall", nom)
+    if GEEK_EXE.exists():
+        pr("[cyan]Opening Geek Uninstaller to clean leftovers...[/cyan]")
+        pr("[dim]  -> Right-click the program then 'Scan for Leftovers'[/dim]")
+        try:
+            ctypes.windll.shell32.ShellExecuteW(None,"runas",str(GEEK_EXE),None,str(BASE_DIR),1)
+            log("geek_uninstaller", nom)
+        except Exception as e:
+            console.print("[red]Cannot launch Geek Uninstaller: [/red]", end="")
+            console.print(str(e), markup=False)
+    else:
+        pr("[yellow]Tip: place geek.exe next to fennec.py for registry cleanup.[/yellow]")
+        pr("[dim]  Download at https://geekuninstaller.com (free, portable)[/dim]")
 
 def cmd_search(terme):
-    """Recherche web DDG + synthèse Qwen + winget si logiciel."""
     if not terme:
-        pr("[red]Usage: search [terme][/red]")
+        pr("[red]Usage: search [term][/red]")
         return
-
-    # ── Scraping DDG ──────────────────────────────────────────────────────────
-    pr(f"[cyan]Recherche : {escape(terme)}[/cyan]")
+    pr(f"[cyan]{t('search_label')}{escape(terme)}[/cyan]")
     resultats = []
     try:
         resultats = _scrape_ddg(terme)
     except Exception as e:
-        console.print("[yellow]Scraping indisponible ([/yellow]", end="")
+        console.print(f"[yellow]Scraping unavailable: [/yellow]", end="")
         console.print(str(e), markup=False, end="")
-        console.print("[yellow]). Ouverture navigateur...[/yellow]")
+        console.print(f"[yellow] {t('opening_browser')}[/yellow]")
         try:
             os.startfile(f"https://duckduckgo.com/?q={urllib.request.quote(terme)}")
         except Exception:
@@ -826,372 +1394,307 @@ def cmd_search(terme):
         return
 
     if not resultats:
-        pr("[yellow]Aucun résultat. Ouverture navigateur...[/yellow]")
-        os.startfile(f"https://duckduckgo.com/?q={urllib.request.quote(terme)}")
+        pr(f"[yellow]{t('no_result')} {t('opening_browser')}[/yellow]")
+        try:
+            os.startfile(f"https://duckduckgo.com/?q={urllib.request.quote(terme)}")
+        except Exception:
+            pass
         log("search", terme)
         return
 
-    # ── Synthèse Qwen à partir des extraits ───────────────────────────────────
     if ollama_vivant():
         contexte = "\n".join(
             f"[{i+1}] {titre}\n{extrait}"
-            for i, (titre, lien, extrait) in enumerate(resultats)
-            if extrait
+            for i, (titre, lien, extrait) in enumerate(resultats) if extrait
         )
+        lang_instr = "Respond in English." if LANG == "en" else "Reponds en francais."
         messages = [
             {"role": "system", "content":
-                "Tu es un assistant. À partir des extraits de recherche fournis, "
-                "réponds directement à la question en français en 2-4 phrases max. "
-                "Sois factuel, concis. Ne mentionne pas les sources par numéro. "
-                "Si les extraits ne suffisent pas, dis-le honnêtement."},
-            {"role": "user", "content":
-                f"Question : {terme}\n\nExtraits de recherche :\n{contexte}"},
+             f"You are an assistant. From the search excerpts, answer the question "
+             f"in 2-4 sentences max. Be factual and concise. {lang_instr} "
+             "If excerpts are insufficient, say so."},
+            {"role": "user", "content": f"Question: {terme}\n\nExcerpts:\n{contexte}"},
         ]
-        with Progress(SpinnerColumn(), TextColumn("[cyan]Synthèse Qwen..."), transient=True) as prog:
+        with Progress(SpinnerColumn(), TextColumn("[cyan]Qwen synthesis..."), transient=True) as prog:
             prog.add_task("")
             reponse = appel_chat(messages)
         if reponse:
-            pr("[bold cyan]Réponse >[/bold cyan]")
+            pr("[bold cyan]Answer >[/bold cyan]")
             for ligne in reponse.splitlines():
                 console.print(f"  {ligne}", markup=False)
             console.print("")
 
-    # ── Affichage des sources ─────────────────────────────────────────────────
-    pr("[dim]Sources :[/dim]")
+    pr("[dim]Sources:[/dim]")
     for i, (titre, lien, extrait) in enumerate(resultats, 1):
-        console.print(f"  [bold]{i}.[/bold] {escape(titre)}", markup=True)
-        console.print(f"     [dim]{escape(lien)}[/dim]", markup=True)
+        console.print(f"  [bold]{i}.[/bold] {escape(titre)}")
+        console.print(f"     [dim]{escape(lien)}[/dim]")
 
-    # ── Winget si ça ressemble à un logiciel ──────────────────────────────────
-    mots_logiciel = {"installer", "telecharger", "logiciel", "app", "programme",
-                     "gratuit", "windows", "download", "software"}
+    mots_logiciel = {"install","download","logiciel","app","programme","gratuit",
+                     "windows","software","telecharger"}
     if any(m in terme.lower() for m in mots_logiciel):
-        result = subprocess.run(
-            ["winget", "search", terme],
-            capture_output=True, text=True, encoding="utf-8", errors="replace"
-        )
+        result = subprocess.run(["winget","search",terme],
+                                capture_output=True, text=True, encoding="utf-8", errors="replace")
         utiles = [l for l in result.stdout.strip().splitlines() if l.strip()][:6]
-        if utiles and not any("Aucun" in l for l in utiles):
-            pr("[dim]Winget :[/dim]")
+        if utiles and not any(x in " ".join(utiles).lower() for x in ("no package","aucun")):
+            pr("[dim]Winget:[/dim]")
             for l in utiles:
                 console.print(f"  {l}", markup=False)
-
     log("search", terme)
 
-
 def cmd_download(url, dest=""):
-    """Telecharge un fichier depuis une URL vers cwd (ou dest)."""
     if not url:
         pr("[red]Usage: download [url] [dest?][/red]")
         return
-    if not url.startswith(("http://", "https://")):
-        pr("[red]URL invalide : doit commencer par http:// ou https://[/red]")
+    if not url.startswith(("http://","https://")):
+        pr("[red]Invalid URL: must start with http:// or https://[/red]")
         return
-    nom_fichier = Path(url.split("?")[0]).name or "fichier_telecharge"
+    nom_fichier = Path(url.split("?")[0]).name or "downloaded_file"
     dest_path   = (resoudre(dest) if dest else cwd / nom_fichier)
-    console.print(f"[cyan]Telechargement : {escape(url)}[/cyan]")
+    console.print(f"[cyan]Downloading: {escape(url)}[/cyan]")
     console.print(f"[dim]  -> {escape(str(dest_path))}[/dim]")
-    dest_path_tmp = dest_path.with_suffix(dest_path.suffix + ".tmp")
+    dest_tmp = dest_path.with_suffix(dest_path.suffix + ".tmp")
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Fennec/1.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Fennec/2.0"})
         with urllib.request.urlopen(req, timeout=60) as resp:
-            taille_totale = int(resp.headers.get("Content-Length", 0))
-            taille_lue    = 0
-            BLOC          = 65536
-            with open(dest_path_tmp, "wb") as f:
+            total = int(resp.headers.get("Content-Length", 0))
+            read  = 0
+            with open(dest_tmp, "wb") as f:
                 while True:
-                    bloc = resp.read(BLOC)
+                    bloc = resp.read(65536)
                     if not bloc:
                         break
                     f.write(bloc)
-                    taille_lue += len(bloc)
-                    if taille_totale:
-                        pct = min(100, int(taille_lue * 100 / taille_totale))
-                        print(f"\r  {pct}%  {fmt_taille(taille_lue)} / {fmt_taille(taille_totale)}   ", end="", flush=True)
+                    read += len(bloc)
+                    if total:
+                        pct = min(100, int(read * 100 / total))
+                        print(f"\r  {pct}%  {fmt_taille(read)} / {fmt_taille(total)}   ", end="", flush=True)
         print()
-        dest_path_tmp.replace(dest_path)
-        console.print(f"[green]Telecharge : {escape(dest_path.name)}  ({fmt_taille(dest_path.stat().st_size)})[/green]")
+        dest_tmp.replace(dest_path)
+        console.print(f"[green]Downloaded: {escape(dest_path.name)}  ({fmt_taille(dest_path.stat().st_size)})[/green]")
         log("download", f"{url} -> {dest_path}")
     except Exception as e:
-        if dest_path_tmp.exists():
-            dest_path_tmp.unlink(missing_ok=True)
-        console.print(f"[red]Erreur telechargement : [/red]", end=""); console.print(str(e), markup=False)
+        if dest_tmp.exists():
+            dest_tmp.unlink(missing_ok=True)
+        console.print("[red]Download error: [/red]", end="")
+        console.print(str(e), markup=False)
         log("download_error", str(e))
 
-
 def cmd_install(nom):
-    """Recherche et installe un programme via winget."""
     if not nom:
-        pr("[red]Usage: install [programme][/red]")
+        pr("[red]Usage: install [program][/red]")
         return
-    console.print(f"[cyan]Recherche de '{escape(nom)}' dans winget...[/cyan]")
-    result = subprocess.run(
-        ["winget", "search", nom],
-        capture_output=True, text=True, encoding="utf-8", errors="replace"
-    )
+    console.print(f"[cyan]Searching '{escape(nom)}' in winget...[/cyan]")
+    result = subprocess.run(["winget","search",nom],
+                            capture_output=True, text=True, encoding="utf-8", errors="replace")
     lignes = [l for l in result.stdout.strip().splitlines() if l.strip()]
     if not lignes:
-        console.print(f"[yellow]Aucun resultat pour '{escape(nom)}'.[/yellow]")
+        console.print(f"[yellow]No results for '{escape(nom)}'.[/yellow]")
         return
     for l in lignes[:10]:
         console.print(f"  {l}", markup=False)
-    if not confirmer(f"Installer '{escape(nom)}' via winget ?"):
+    if not confirmer(f"Install '{nom}' via winget?"):
         return
-    pr("[cyan]Installation en cours...[/cyan]")
-    with Progress(SpinnerColumn(), TextColumn("[cyan]Installation..."), transient=True) as prog:
+    pr("[cyan]Installing...[/cyan]")
+    with Progress(SpinnerColumn(), TextColumn("[cyan]Installing..."), transient=True) as prog:
         prog.add_task("")
         result = subprocess.run(
-            ["winget", "install", "--name", nom, "--silent",
-             "--accept-package-agreements", "--accept-source-agreements"],
+            ["winget","install","--name",nom,"--silent",
+             "--accept-package-agreements","--accept-source-agreements"],
             capture_output=True, text=True, encoding="utf-8", errors="replace"
         )
     if result.stdout:
         console.print(result.stdout.strip(), markup=False)
     if result.returncode != 0:
         if result.stderr:
-            console.print("[red]Erreur : [/red]", end=""); console.print(result.stderr.strip(), markup=False)
-        pr("[yellow]Astuce : essaie avec l'ID exact (ex: install VideoLAN.VLC)[/yellow]")
+            console.print(f"[red]{t('error')}[/red]", end="")
+            console.print(result.stderr.strip(), markup=False)
+        pr(f"[yellow]{t('install_tip')}[/yellow]")
         log("install_error", nom)
         return
-    console.print(f"[green]'{escape(nom)}' installe avec succes.[/green]")
+    console.print(f"[green]'{escape(nom)}' installed successfully.[/green]")
     log("install", nom)
 
-
 def cmd_redate(dossier="", mode="creation"):
-    """Renomme tous les fichiers d'un dossier par date+numero : 2024_01, 2024_02..."""
     dp = resoudre(dossier) if dossier else cwd
     if not dp.exists() or not dp.is_dir():
-        console.print(f"[red]Dossier introuvable : {escape(str(dp))}[/red]")
+        console.print(f"[red]{t('not_found')}{escape(str(dp))}[/red]")
         return
-
-    # Liste uniquement les fichiers (pas les sous-dossiers)
     fichiers = [e for e in dp.iterdir() if e.is_file()]
     if not fichiers:
-        pr("[yellow]Aucun fichier dans ce dossier.[/yellow]")
+        pr("[yellow]No files in this folder.[/yellow]")
         return
-
-    # Recupere la date selon le mode (creation ou modification)
     def get_date(f):
         st = f.stat()
         ts = st.st_ctime if mode == "creation" else st.st_mtime
         return datetime.fromtimestamp(ts)
-
-    # Trie par date
     fichiers.sort(key=get_date)
-
-    # Construit les nouveaux noms : groupe par annee, compteur par annee
     plan = []
     compteurs = {}
     for f in fichiers:
         d     = get_date(f)
         annee = str(d.year)
         compteurs[annee] = compteurs.get(annee, 0) + 1
-        numero    = compteurs[annee]
-        nouveau   = f"{annee}_{numero:02d}{f.suffix.lower()}"
-        plan.append((f, dp / nouveau))
-
-    # Affiche le plan avant confirmation
-    pr(f"[cyan]Plan de renommage ({len(plan)} fichiers) — date de {mode} :[/cyan]")
+        plan.append((f, dp / f"{annee}_{compteurs[annee]:02d}{f.suffix.lower()}"))
+    pr(f"[cyan]Rename plan ({len(plan)} files) -- date: {mode}[/cyan]")
     for src, dst in plan[:20]:
         console.print(f"  {src.name:<40} -> {dst.name}", markup=False)
     if len(plan) > 20:
-        pr(f"[dim]  ... et {len(plan)-20} autres[/dim]")
-
-    if not confirmer(f"Renommer {len(plan)} fichiers dans {dp.name} ?"):
+        pr(f"[dim]  ... and {len(plan)-20} more[/dim]")
+    if not confirmer(f"Rename {len(plan)} files in {dp.name}?"):
         return
-
-    # Passe 1 : renomme vers des noms temporaires pour eviter les collisions
     tmp_plan = []
     try:
         for src, dst in plan:
             tmp = src.parent / (src.name + ".redate_tmp")
             src.rename(tmp)
             tmp_plan.append((tmp, dst))
-    except (KeyboardInterrupt, Exception) as _e:
+    except Exception:
         for tmp, _ in tmp_plan:
             try: tmp.rename(tmp.parent / tmp.name.removesuffix(".redate_tmp"))
             except Exception: pass
-        pr("[yellow]Interruption — fichiers restaures.[/yellow]")
+        pr("[yellow]Interrupted -- files restored.[/yellow]")
         return
-
-    # Passe 2 : renomme vers les noms finaux
     erreurs = 0
     for tmp, dst in tmp_plan:
         try:
-            # Si le nom final existe deja, ajoute un suffixe
             final = dst
             if final.exists():
                 final = dst.parent / f"{dst.stem}_dup{dst.suffix}"
             tmp.rename(final)
             console.print(f"[green]  {escape(final.name)}[/green]")
         except Exception as e:
-            console.print("[red]  Erreur : [/red]", end=""); console.print(f"{escape(tmp.name)} -> {escape(dst.name)} : {escape(str(e))}", markup=False)
+            console.print("[red]  Error: [/red]", end="")
+            console.print(str(e), markup=False)
             erreurs += 1
-
-    pr(f"[bold green]{len(plan) - erreurs} fichiers renommes.[/bold green]")
+    pr(f"[bold green]{len(plan)-erreurs} files renamed.[/bold green]")
     if erreurs:
-        pr(f"[red]{erreurs} erreur(s).[/red]")
+        pr(f"[red]{erreurs} error(s).[/red]")
     log("redate", f"{dp} mode={mode} n={len(plan)}")
 
-
-# ── Documentation intégrée pour helpchat ─────────────────────────────────────
+# ── Helpchat ──────────────────────────────────────────────────────────────────
 FENNEC_DOC = r"""
-Fennec est un shell de gestion de fichiers Windows assisté par IA (Qwen2.5:7b via Ollama).
-Tu es le bot d'aide de Fennec. Réponds uniquement sur son fonctionnement. Sois concis et donne des exemples concrets.
+Fennec is a Windows file management shell powered by AI (Qwen2.5 via Ollama).
 
 === NAVIGATION ===
-cd [dossier]        : Change de dossier. Sans argument, affiche le dossier actuel.
-                      Exemples : cd Desktop   cd ..   cd "C:\Users\<nom>\Documents"
-                      Le . désigne le dossier courant, .. le dossier parent.
-                      Tu peux aussi utiliser un nom de favori (bm) à la place d'un chemin.
+cd [folder]         Change directory. Without argument shows current folder.
+list [folder?]      List files and folders.
+ls                  Alias for list.
+sort [folder?] [size|date]  Sort files by size (default) or date.
+find [pattern] [folder?] [depth?]  Recursive search by glob. Optional depth limit.
+                    Examples: find *.pdf   find *.jpg Downloads 3
 
-list [dossier?]     : Liste les fichiers et dossiers. Dossiers en bleu avec /.
-ls                  : Alias de list.
-                      Exemples : list   list Desktop   list "C:\Users\<nom>"
+=== FILES ===
+read [file] [n?]    Read a file (max n lines). Supports .txt .py .pdf .docx etc.
+cat                 Alias for read.
+write [file] [text?]  Write text to file. Interactive mode if no text given.
+delete [file]       Moves to .fennec_trash folder (recoverable with undo). Requires confirmation.
+rename [folder] [old] [new]  Mass rename with glob patterns. * captures and reinjects.
+move [source] [dest]  Move a file. Requires confirmation.
+duplicate [source] [dest?]  Copy a file.
+diff [file1] [file2]  Compare two text files side by side (color diff).
+undo                Undo the last delete/move/rename operation.
 
-sort [dossier?] [taille|date] : Trie les fichiers par taille (défaut) ou par date de modification.
-                      Exemples : sort   sort . date   sort Downloads taille
+=== SYSTEM ===
+open [path?]        Open with associated Windows app. No arg: opens current folder.
+clip [path?]        Copy absolute path to clipboard.
+exec [command]      Run any CMD command. Requires confirmation.
+redate [folder?] [creation|modif]  Rename files by date+number.
 
-find [motif] [dossier?] : Recherche récursive par motif glob dans le dossier (ou cwd).
-                      Exemples : find *.pdf   find rapport* Documents   find *.jpg Downloads
+=== WEB & INSTALL ===
+search [term]       Web search (DuckDuckGo) + Qwen synthesis + winget check.
+download [url] [dest?]  Download a file with progress bar.
+install [program]   Install via winget. Requires confirmation.
+uninstall [program] Uninstall via winget + optional Geek Uninstaller cleanup.
 
-=== FICHIERS ===
-read [fichier]      : Lit et affiche le contenu d'un fichier (max 100 lignes).
-cat                 : Alias de read.
-                      Supporte : .txt .py .js .csv .json .md .html .bat .log .xml .css
-                      Supporte aussi : .pdf (pdfplumber) et .docx (python-docx) si installés.
-                      Exemples : read notes.txt   read "C:\rapport.pdf"
+=== BOOKMARKS ===
+bm list             List bookmarks.
+bm add [name] [path?]  Save current folder (or given path) as a short name.
+bm remove [name]    Remove a bookmark.
+bookmark            Alias for bm.
 
-write [fichier] [texte?] : Écrit du texte dans un fichier (crée ou écrase). Demande confirmation.
-                      Sans texte : passe en mode interactif (une ligne vide pour finir).
-                      Exemples : write notes.txt Bonjour monde
-                                 write notes.txt   (puis saisie interactive multiligne)
+=== ALIASES ===
+alias list              List all aliases.
+alias add [name] [cmd]  Create a shortcut (e.g. alias add ll list).
+alias remove [name]     Remove an alias.
 
-delete [fichier]    : Supprime un fichier. Demande confirmation. ! = dangereux.
-del / rm            : Alias de delete.
-                      Exemple : delete vieux_fichier.txt
+=== SETTINGS ===
+settings                Show current settings.
+settings lang en        Switch interface and AI to English.
+settings lang fr        Switch interface and AI to French.
+settings model [name]   Change Ollama model. No arg: list installed models.
+settings max_steps 0    Auto-estimate steps per agent task (0=auto, n=fixed).
 
-rename [dossier] [ancien] [nouveau] : Renommage en masse avec motifs glob. Demande confirmation.
-                      Le * capture la partie variable et la réinjecte.
-                      Exemples :
-                        rename . * 2024_*              -> ajoute préfixe 2024_ à tout
-                        rename . *.jpg *.jpeg          -> change l'extension
-                        rename . rapport_* note_*      -> remplace un mot
-                        rename Photos *.JPG *.jpg      -> normalise en minuscules
-                        rename . facture_2023_* facture_2024_*  -> change une partie
+=== AI ===
+agent [instruction] Qwen analyses your request and acts step by step.
+                    Step count is estimated automatically by Qwen.
+                    Confirmation required for delete/move/rename.
+                    Examples:
+                      agent list the 5 heaviest files on my desktop
+                      agent find all PDFs in Downloads and count them
+                      agent delete all .tmp files from current folder
+chat                Free conversation with Qwen (streaming). exit to return.
+helpchat [question] This help bot.
 
-move [source] [dest] : Déplace un fichier ou dossier. Demande confirmation.
-mv                  : Alias de move.
-                      Exemples : move rapport.pdf Archives   move . Archives/rapport.pdf
+=== MISC ===
+logs [n?]           Show last n logged actions (default 30).
+help                Show command list.
+exit / quit / q     Quit Fennec.
 
-duplicate [source] [dest?] : Copie un fichier. Sans dest, crée un _copie dans le même dossier.
-cp / copy           : Alias de duplicate.
-                      Exemples : duplicate rapport.pdf   duplicate rapport.pdf Archives/
-
-=== SYSTÈME ===
-open [chemin?]      : Ouvre un fichier ou dossier avec l'application associée Windows.
-                      Sans argument : ouvre le dossier courant dans l'Explorateur.
-                      Exemples : open rapport.pdf   open .   open "C:\Users\<nom>\Desktop"
-                      DIFFÉRENCE avec read : open lance l'appli Windows (Word, VLC...), read affiche le texte brut dans le terminal.
-
-clip [chemin?]      : Copie le chemin absolu dans le presse-papier Windows.
-                      Exemples : clip   clip rapport.pdf
-
-exec [commande]     : Exécute n'importe quelle commande CMD Windows. Demande confirmation.
-                      Exemples : exec dir C:\Windows   exec ipconfig   exec python script.py
-                      DIFFÉRENCE avec open : exec lance une commande texte, open ouvre avec l'appli associée.
-
-=== WEB & INSTALLATION ===
-search [terme]      : Recherche dans winget (logiciels installables) ET sur DuckDuckGo.
-                      Si pas de résultat web, ouvre le navigateur.
-                      Exemples : search VLC   search convertisseur video   search python
-
-download [url] [dest?] : Télécharge un fichier avec barre de progression.
-                      Sans dest : enregistre dans le dossier courant.
-                      Exemples : download https://exemple.com/fichier.zip
-                                 download https://exemple.com/app.exe Telechargements/
-
-install [programme] : Cherche dans winget, affiche les résultats, installe après confirmation.
-                      Astuce : utilise l'ID exact pour plus de précision.
-                      Exemples : install VLC   install VideoLAN.VLC   install 7zip   install Git
-
-uninstall [programme] : Désinstalle via winget puis ouvre Geek Uninstaller (geek.exe) pour nettoyer les restes du registre.
-                      Place geek.exe dans le même dossier que fennec.py (geekuninstaller.com, gratuit).
-                      Exemple : uninstall AnyDesk
-
-=== FAVORIS ===
-bm list             : Liste les favoris enregistrés.
-bm add [nom] [chemin?] : Enregistre le dossier courant (ou le chemin donné) sous un nom court.
-bm remove [nom]     : Supprime un favori.
-bookmark            : Alias de bm.
-                      Une fois ajouté, utilise le nom comme un chemin dans cd, list, read...
-                      Exemples : bm add projets C:\Dev\Projets
-                                 cd projets   list projets   find *.py projets
-
-=== IA ===
-agent [instruction] : Qwen analyse ta demande, choisit les outils Fennec et agit étape par étape (max 8 étapes).
-                      Confirmation demandée pour delete/move/rename.
-                      Exemples : agent liste les 5 fichiers les plus lourds du bureau
-                                 agent trouve tous les PDF dans Downloads et dis combien il y en a
-                                 agent supprime les fichiers .tmp du bureau
-
-chat                : Conversation libre avec Qwen2.5. Garde les 10 derniers messages en mémoire.
-                      Tape exit pour revenir à Fennec.
-
-helpchat [question] : Tu y es ! Pose une question sur le fonctionnement de Fennec.
-
-=== DIVERS ===
-logs [n?]           : Affiche les n dernières actions enregistrées (défaut : 30).
-help                : Affiche la liste des commandes.
-exit / quit / q     : Quitte Fennec.
-
-=== ASTUCES ===
-- Tab : autocomplétion des commandes et des chemins.
-- Historique : flèches haut/bas pour rappeler les commandes précédentes.
-- Chemins avec espaces : utilise des guillemets -> cd "Mon Dossier"
-- Commande inconnue : Fennec la tente directement comme commande Windows.
-- Les commandes marquées ! demandent toujours une confirmation avant d'agir.
-- Le . désigne toujours le dossier courant, .. le dossier parent.
+=== TIPS ===
+- Tab: autocomplete commands and paths.
+- Up/Down arrows: recall previous commands (history).
+- Paths with spaces: use quotes -> cd "My Folder"
+- Unknown command: Fennec tries it as a Windows CMD command.
+- Commands marked ! always ask for confirmation before acting.
+- . = current folder, .. = parent folder.
+- delete is safe: files go to .fennec_trash, use undo to recover.
 """
 
-
-def cmd_helpchat(question):
-    """Mini bot d'aide sur le fonctionnement de Fennec, propulsé par Qwen."""
-    if not question:
-        pr("[red]Usage: helpchat [question][/red]")
-        pr("[dim]Exemples : helpchat comment renommer des photos[/dim]")
-        pr("[dim]           helpchat difference entre exec et open[/dim]")
-        return
+def cmd_helpchat(question=""):
+    """If called with a question, answer it directly.
+    If called without args, enter interactive help mode."""
     if not verifier_ollama():
         return
+    lang_instr = "Answer in English." if LANG == "en" else "Reponds en francais."
+    system_msg = {
+        "role": "system", "content":
+        f"You are the built-in help bot for Fennec, an AI-powered Windows shell. "
+        f"Use only the documentation below to answer. Be concise and always give a concrete command example. "
+        f"{lang_instr}\n\n=== FENNEC DOCUMENTATION ===\n{FENNEC_DOC}"
+    }
 
-    messages = [
-        {"role": "system", "content":
-            "Tu es le bot d'aide intégré de Fennec, un shell Windows assisté par IA. "
-            "Utilise uniquement la documentation ci-dessous pour répondre. "
-            "Sois concis, direct, et donne toujours un exemple concret de commande. "
-            "Réponds en français.\n\n"
-            "=== DOCUMENTATION FENNEC ===\n" + FENNEC_DOC},
-        {"role": "user", "content": question},
-    ]
+    def _ask(q):
+        console.print("[bold cyan]Help > [/bold cyan]", end="")
+        reponse = appel_chat_stream([system_msg, {"role": "user", "content": q}])
+        if not reponse:
+            pr(f"[yellow]{t('no_reply')}[/yellow]")
+        log("helpchat", q[:100])
 
-    with Progress(SpinnerColumn(), TextColumn("[cyan]Qwen cherche dans la doc..."), transient=True) as prog:
-        prog.add_task("")
-        reponse = appel_chat(messages)
-
-    if not reponse:
-        pr("[yellow]Pas de réponse.[/yellow]")
+    if question:
+        _ask(question)
         return
 
-    pr("[bold cyan]Aide >[/bold cyan]")
-    for ligne in reponse.splitlines():
-        console.print(f"  {ligne}", markup=False)
-    log("helpchat", question[:100])
+    # Interactive mode
+    pr("[cyan]-- Fennec Help  (exit to quit) --[/cyan]")
+    pr("[dim]Ask anything about Fennec commands.[/dim]")
+    while True:
+        try:
+            console.print("[cyan]help >[/cyan] ", end="")
+            q = input().strip()
+        except (KeyboardInterrupt, EOFError):
+            pr(f"\n[dim]{t('chat_back')}[/dim]")
+            break
+        if not q:
+            continue
+        if q.lower() in ("exit", "quit", "q"):
+            pr(f"[dim]{t('chat_back')}[/dim]")
+            break
+        _ask(q)
 
-
+# ── Logs & help ───────────────────────────────────────────────────────────────
 def cmd_logs(n=30):
     if not LOG_FILE.exists():
-        pr("[dim]Aucun log.[/dim]")
+        pr("[dim]No logs.[/dim]")
         return
     with open(LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
         lignes = f.readlines()
@@ -1199,117 +1702,137 @@ def cmd_logs(n=30):
         console.print(f"[dim]{escape(ligne.rstrip())}[/dim]")
 
 def cmd_help():
-    lignes = [
-        ("cd",        "[dossier]",                    "Changer de dossier"),
-        ("list",      "[dossier?]",                   "Lister les fichiers"),
-        ("find",      "[*.ext] [dossier?]",           "Recherche recursive"),
-        ("sort",      "[dossier?] [taille|date]",     "Trier"),
-        ("read",      "[fichier]",                    "Lire un fichier"),
-        ("write",     "[fichier] [texte?]",           "Ecrire (texte ou mode interactif) !"),
-        ("delete",    "[fichier]",                    "Supprimer  !"),
-        ("rename",    "[dossier] [ancien] [nouveau]", "Renommer en masse  !"),
-        ("move",      "[source] [dest]",              "Deplacer  !"),
-        ("duplicate", "[source] [dest?]",             "Copier"),
-        ("open",      "[chemin?]",                    "Ouvrir avec app associee"),
-        ("clip",      "[chemin?]",                    "Chemin dans presse-papier"),
-        ("exec",      "[commande]",                   "Executer commande CMD  !"),
-        ("redate",    "[dossier?] [creation|modif]",   "Renommer par date+numero  !"),
-        ("search",    "[terme]",                       "Recherche web + winget"),
-        ("download",  "[url] [dest?]",                  "Telecharger un fichier"),
-        ("install",   "[programme]",                   "Installer via winget  !"),
-        ("uninstall", "[programme]",                  "Desinstaller + nettoyage (Geek)  !"),
-        ("bm",        "[list|add|remove] [nom]",      "Favoris"),
-        ("agent",     "[instruction]",                "Qwen agit sur tes fichiers"),
-        ("helpchat",  "[question]",                   "Bot d'aide sur Fennec"),
-        ("chat",      "",                             "Conversation avec Qwen"),
-        ("logs",      "[n=30]",                       "Derniers logs"),
-        ("help",      "",                             "Cette aide"),
-        ("exit",      "",                             "Quitter"),
-    ]
-    pr("[cyan]-- Fennec commandes --[/cyan]")
-    for cmd, args, desc in lignes:
-        pr(f"  [bold]{cmd:<12}[/bold][dim]{args:<35}[/dim] {desc}")
-    pr("[dim]  ! = confirmation requise[/dim]")
+    if LANG == "en":
+        lignes = [
+            ("cd",        "[folder]",                       "Change directory"),
+            ("list/ls",   "[folder?]",                      "List files"),
+            ("find",      "[*.ext] [folder?] [depth?]",     "Recursive search"),
+            ("sort",      "[folder?] [size|date]",          "Sort files"),
+            ("read/cat",  "[file] [lines?]",                "Read a file"),
+            ("write",     "[file] [text?]",                 "Write file !"),
+            ("delete",    "[file]",                         "Move to trash (undo restores) !"),
+            ("rename",    "[folder] [old] [new]",           "Mass rename with glob !"),
+            ("move",      "[source] [dest]",                "Move !"),
+            ("duplicate", "[source] [dest?]",               "Copy"),
+            ("diff",      "[file1] [file2]",                "Compare two files"),
+            ("undo",      "",                               "Undo last destructive op"),
+            ("open",      "[path?]",                        "Open with Windows app"),
+            ("clip",      "[path?]",                        "Copy path to clipboard"),
+            ("exec",      "[command]",                      "Run CMD command !"),
+            ("redate",    "[folder?] [creation|modif]",     "Rename files by date !"),
+            ("search",    "[term]",                         "Web search + Qwen"),
+            ("download",  "[url] [dest?]",                  "Download a file"),
+            ("install",   "[program]",                      "Install via winget !"),
+            ("uninstall", "[program]",                      "Uninstall + cleanup !"),
+            ("bm",        "[list|add|remove] [name]",       "Bookmarks"),
+            ("alias",     "[list|add|remove] [name] [cmd]", "Aliases"),
+        ("sudo",      "[on|off]",                      "Auto-confirm mode (no more y/n)"),
+            ("settings",  "[key] [value?]",                 "Settings (lang, model, ...)"),
+            ("agent",     "[instruction]",                  "AI agent (auto steps)"),
+            ("chat",      "",                               "Chat with Qwen (streaming)"),
+            ("helpchat",  "[question?]",                    "Built-in help bot"),
+            ("logs",      "[n=30]",                         "Last logs"),
+            ("help",      "",                               "This help"),
+            ("exit",      "",                               "Quit"),
+        ]
+        footer = "  ! = confirmation required"
+        header = "-- Fennec commands --"
+    else:
+        lignes = [
+            ("cd",        "[dossier]",                          "Changer de dossier"),
+            ("list/ls",   "[dossier?]",                         "Lister les fichiers"),
+            ("find",      "[*.ext] [dossier?] [profondeur?]",   "Recherche recursive"),
+            ("sort",      "[dossier?] [taille|date]",           "Trier"),
+            ("read/cat",  "[fichier] [lignes?]",                "Lire un fichier"),
+            ("write",     "[fichier] [texte?]",                 "Ecrire (interactif) !"),
+            ("delete",    "[fichier]",                          "Corbeille (undo restaure) !"),
+            ("rename",    "[dossier] [ancien] [nouveau]",       "Renommer en masse !"),
+            ("move",      "[source] [dest]",                    "Deplacer !"),
+            ("duplicate", "[source] [dest?]",                   "Copier"),
+            ("diff",      "[fichier1] [fichier2]",              "Comparer deux fichiers"),
+            ("undo",      "",                                   "Annuler derniere action"),
+            ("open",      "[chemin?]",                          "Ouvrir avec app Windows"),
+            ("clip",      "[chemin?]",                          "Chemin dans presse-papier"),
+            ("exec",      "[commande]",                         "Executer commande CMD !"),
+            ("redate",    "[dossier?] [creation|modif]",        "Renommer par date !"),
+            ("search",    "[terme]",                            "Recherche web + Qwen"),
+            ("download",  "[url] [dest?]",                      "Telecharger un fichier"),
+            ("install",   "[programme]",                        "Installer via winget !"),
+            ("uninstall", "[programme]",                        "Desinstaller + nettoyage !"),
+            ("bm",        "[list|add|remove] [nom]",            "Favoris"),
+            ("alias",     "[list|add|remove] [nom] [cmd]",      "Alias"),
+            ("sudo",      "[on|off]",                               "Mode auto-validation (plus de o/n)"),
+            ("settings",  "[cle] [valeur?]",                    "Parametres (lang, model...)"),
+            ("agent",     "[instruction]",                      "Agent IA (etapes auto)"),
+            ("chat",      "",                                   "Chat avec Qwen (streaming)"),
+            ("helpchat",  "[question?]",                        "Bot d'aide integre"),
+            ("logs",      "[n=30]",                             "Derniers logs"),
+            ("help",      "",                                   "Cette aide"),
+            ("exit",      "",                                   "Quitter"),
+        ]
+        footer = "  ! = confirmation requise"
+        header = "-- Commandes Fennec --"
+    # Split into sections
+    NAV   = {"cd","list/ls","find","sort"}
+    FILES = {"read/cat","write","delete","rename","move","duplicate","diff","undo"}
+    SYS   = {"open","clip","exec","redate"}
+    WEB   = {"search","download","install","uninstall"}
+    AI    = {"agent","chat","helpchat"}
+    CFG   = {"bm","alias","sudo","settings","logs","help","exit"}
 
-def dispatcher(cmd, args):
-    def a(i, d=None): return args[i] if len(args) > i else d
-    match cmd:
-        case "cd":                   cmd_cd(a(0,""))
-        case "list"|"ls":            cmd_list(a(0,""))
-        case "find":                 cmd_find(a(0,"*"),a(1,"")) if args else pr("[red]Usage: find [motif][/red]")
-        case "read"|"cat":
-            if not args: pr("[red]Usage: read [fichier] [lignes?][/red]")
+    sec_label = {
+        "NAV":   "  Navigation",
+        "FILES": "  Fichiers",
+        "SYS":   "  Systeme",
+        "WEB":   "  Web & Install",
+        "AI":    "  Intelligence artificielle",
+        "CFG":   "  Config & divers",
+    } if LANG != "en" else {
+        "NAV":   "  Navigation",
+        "FILES": "  Files",
+        "SYS":   "  System",
+        "WEB":   "  Web & Install",
+        "AI":    "  AI",
+        "CFG":   "  Config & misc",
+    }
+    sec_map = [("NAV",NAV),("FILES",FILES),("SYS",SYS),("WEB",WEB),("AI",AI),("CFG",CFG)]
+
+    pr("")
+    pr(f"[bold cyan]  🦊 {header}[/bold cyan]")
+    pr(f"  [dim]{'─'*54}[/dim]")
+
+    for sec_key, sec_cmds in sec_map:
+        sec_lines = [(c,a,d) for c,a,d in lignes if c in sec_cmds]
+        if not sec_lines:
+            continue
+        pr(f"  [bold white]{sec_label[sec_key]}[/bold white]")
+        for cmd, args, desc in sec_lines:
+            is_danger = "!" in desc
+            is_ai     = sec_key == "AI"
+            is_sudo   = cmd == "sudo"
+            desc_clean = desc.rstrip(" !")
+            danger_tag = " [red]![/red]" if is_danger else ""
+            if is_ai:
+                cmd_color = f"[bold green]{cmd:<14}[/bold green]"
+            elif is_sudo:
+                cmd_color = f"[bold yellow]{cmd:<14}[/bold yellow]"
             else:
-                try: lim = int(a(1, 100))
-                except: lim = 100
-                cmd_read(a(0), lim)
-        case "write":                cmd_write(a(0), " ".join(args[1:]) if len(args) >= 2 else None) if args else pr("[red]Usage: write [fichier] [texte?][/red]")
-        case "delete"|"del"|"rm":    cmd_delete(a(0)) if args else pr("[red]Usage: delete [fichier][/red]")
-        case "rename":
-            if len(args) < 2:
-                pr("[red]Usage : rename [motif_ancien] [motif_nouveau] (dans cwd)[/red]")
-                pr("[dim]       rename [dossier] [motif_ancien] [motif_nouveau][/dim]")
-                pr("[dim]Exemple : rename C:/photos *.JPG *.jpg[/dim]")
-                pr("[dim]Exemple : rename . rapport_* note_*[/dim]")
-            elif len(args) == 2: cmd_rename(".", a(0), a(1))
-            else: cmd_rename(a(0), a(1), a(2))
-        case "move"|"mv":            cmd_move(a(0),a(1)) if len(args)>=2 else pr("[red]Usage: move [source] [dest][/red]")
-        case "duplicate"|"cp"|"copy":cmd_duplicate(a(0),a(1,"")) if args else pr("[red]Usage: duplicate [source][/red]")
-        case "sort":                 cmd_sort(a(0,""),a(1,"taille"),a(2,"0"))
-        case "open":                 cmd_open(a(0,""))
-        case "clip":                 cmd_clip(a(0,""))
-        case "redate":               cmd_redate(a(0,""), a(1,"creation"))
-        case "search":               cmd_search(" ".join(args)) if args else pr("[red]Usage: search [terme][/red]")
-        case "download":             cmd_download(a(0,""),a(1,"")) if args else pr("[red]Usage: download [url][/red]")
-        case "install":              cmd_install(" ".join(args)) if args else pr("[red]Usage: install [programme][/red]")
-        case "uninstall":            cmd_uninstall(" ".join(args)) if args else pr("[red]Usage: uninstall [programme][/red]")
-        case "exec":                 cmd_exec(" ".join(args)) if args else pr("[red]Usage: exec [commande][/red]")
-        case "bookmark"|"bm":        cmd_bookmark(a(0,"list"),a(1,""),a(2,""))
-        case "agent":                cmd_agent(" ".join(args)) if args else pr("[red]Usage: agent [instruction][/red]")
-        case "helpchat":             cmd_helpchat(" ".join(args)) if args else pr("[red]Usage: helpchat [question][/red]")
-        case "chat":                 cmd_chat()
-        case "logs":                 cmd_logs(int(args[0]) if args else 30)
-        case "help"|"?":             cmd_help()
-        case "exit"|"quit"|"q":      raise SystemExit
-        case _:
-            # Commande inconnue -> tente comme exec Windows
-            cmd_exec(cmd + (" " + " ".join(args) if args else ""))
+                cmd_color = f"[bold cyan]{cmd:<14}[/bold cyan]"
+            pr(f"    {cmd_color}[dim]{args:<32}[/dim] {desc_clean}{danger_tag}")
+        pr("")
 
-def label():
-    try:
-        rel = cwd.relative_to(Path.home())
-        s = ("~/" + str(rel).replace("\\", "/")) if str(rel) != "." else "~"
-    except ValueError:
-        s = str(cwd)
-    return ("..." + s[-35:]) if len(s) > 38 else s
+    pr(f"  [dim][red]![/red] = {footer.replace('! = ', '')}   [yellow]sudo on[/yellow] = auto-valider toutes les actions[/dim]")
+    pr("")
 
-from prompt_toolkit.key_binding import KeyBindings as _KB
-
-def _make_bindings():
-    """Tab = valider/insérer la complétion. Pas d'espace cassant."""
-    kb = _KB()
-
-    @kb.add("tab")
-    def _tab(event):
-        buf = event.app.current_buffer
-        if buf.complete_state:
-            buf.apply_completion(buf.complete_state.current_completion)
-        else:
-            buf.start_completion(select_first=True)
-
-    return kb
-
-# ── Autocomplétion contextuelle ──────────────────────────────────────────────
-CMDS_CHEMIN = {"cd", "list", "ls", "find", "read", "cat", "write", "delete",
-               "rm", "move", "mv", "duplicate", "cp", "open", "clip", "exec",
-               "sort", "rename", "bm"}
-CMDS_TOUTES = ["cd","list","ls","find","read","cat","write","delete","rm",
-               "rename","move","mv","duplicate","cp","sort","open","clip",
-               "exec","redate","search","download","install","uninstall","bookmark","bm","agent","helpchat","chat","logs","help","exit"]
+# ── Autocomplete ──────────────────────────────────────────────────────────────
+CMDS_CHEMIN = {"cd","list","ls","find","read","cat","write","delete","rm","move",
+               "mv","duplicate","cp","open","clip","exec","sort","rename","bm","diff"}
+CMDS_TOUTES = ["cd","list","ls","find","read","cat","write","delete","rm","rename",
+               "move","mv","duplicate","cp","sort","open","clip","exec","redate",
+               "search","download","install","uninstall","bookmark","bm","agent",
+               "helpchat","chat","logs","help","exit","diff","undo","settings","alias","sudo"]
 
 class FennecCompleter(Completer):
-    """Propose les commandes en début de ligne, les chemins du cwd ensuite."""
-
     def get_completions(self, document, complete_event):
         texte = document.text_before_cursor
         try:
@@ -1318,14 +1841,14 @@ class FennecCompleter(Completer):
             tokens = texte.split()
 
         if not tokens or (len(tokens) == 1 and not texte.endswith(" ")):
-            prefix = tokens[0].lower() if tokens else ""
-            for cmd in CMDS_TOUTES:
+            prefix   = tokens[0].lower() if tokens else ""
+            all_cmds = list(CMDS_TOUTES) + list(_aliases.keys())
+            for cmd in all_cmds:
                 if cmd.startswith(prefix):
                     yield Completion(cmd, start_position=-len(prefix))
             return
 
         cmd = tokens[0].lower()
-
         if cmd not in CMDS_CHEMIN:
             return
 
@@ -1333,13 +1856,12 @@ class FennecCompleter(Completer):
             fragment = ""
             base_dir = cwd
         else:
-            fragment = tokens[-1]
-            fragment = fragment.strip('"\'')
+            fragment = tokens[-1].strip("\"'")
             p = Path(fragment)
             if p.is_absolute():
-                base_dir = p.parent if not fragment.endswith(("/", "\\")) else p
+                base_dir = p.parent if not fragment.endswith(("/","\\")) else p
             else:
-                base_dir = (cwd / p).parent if not fragment.endswith(("/", "\\")) else cwd / p
+                base_dir = (cwd/p).parent if not fragment.endswith(("/","\\")) else cwd/p
 
         try:
             entries = sorted(base_dir.iterdir(), key=lambda e: (e.is_file(), e.name.lower()))
@@ -1348,36 +1870,124 @@ class FennecCompleter(Completer):
 
         for entry in entries:
             nom = entry.name
-            typed_name = Path(fragment).name if fragment and not fragment.endswith(("/", "\\")) else ""
+            typed_name = Path(fragment).name if fragment and not fragment.endswith(("/","\\")) else ""
             if typed_name and not nom.lower().startswith(typed_name.lower()):
                 continue
-            display = nom + ("/" if entry.is_dir() else "")
-            if fragment:
-                if fragment.endswith(("/", "\\")):
-                    insert = nom + ("/" if entry.is_dir() else "")
-                    start = 0
-                else:
-                    insert = nom + ("/" if entry.is_dir() else "")
-                    start = -len(Path(fragment).name)
-            else:
-                insert = nom + ("/" if entry.is_dir() else "")
-                start = 0
+            display   = nom + ("/" if entry.is_dir() else "")
             full_path = str(base_dir / nom)
             if " " in full_path:
                 insert = f'"{full_path}{"/" if entry.is_dir() else ""}"'
-                last_token_len = len(tokens[-1]) if not texte.endswith(" ") else 0
-                start = -last_token_len
-            yield Completion(
-                insert,
-                start_position=start,
-                display=display,
-                display_meta="[dir]" if entry.is_dir() else ""
-            )
+                start  = -(len(tokens[-1]) if not texte.endswith(" ") else 0)
+            else:
+                insert = display
+                start  = -len(typed_name) if typed_name else 0
+            yield Completion(insert, start_position=start, display=display,
+                             display_meta="[dir]" if entry.is_dir() else "")
 
+def _make_bindings():
+    kb = _KB()
+    @kb.add("tab")
+    def _tab(event):
+        buf = event.app.current_buffer
+        if buf.complete_state:
+            buf.apply_completion(buf.complete_state.current_completion)
+        else:
+            buf.start_completion(select_first=True)
+    return kb
+
+# ── Dispatcher ────────────────────────────────────────────────────────────────
+def dispatcher(cmd, args):
+    # Alias resolution before dispatch
+    if cmd in _aliases:
+        try:
+            aliased = shlex.split(_aliases[cmd])
+        except ValueError:
+            aliased = _aliases[cmd].split()
+        cmd  = aliased[0].lower()
+        args = aliased[1:] + list(args)
+
+    def a(i, d=None): return args[i] if len(args) > i else d
+    match cmd:
+        case "cd":                   cmd_cd(a(0,""))
+        case "list"|"ls":            cmd_list(a(0,""))
+        case "find":
+            if not args: pr("[red]Usage: find [pattern] [folder?] [depth?][/red]")
+            else: cmd_find(a(0,"*"), a(1,""), a(2,""))
+        case "read"|"cat":
+            if not args: pr("[red]Usage: read [file] [lines?][/red]")
+            else:
+                try: lim = int(a(1,100))
+                except: lim = 100
+                cmd_read(a(0), lim)
+        case "write":
+            if not args: pr("[red]Usage: write [file] [text?][/red]")
+            else: cmd_write(a(0), " ".join(args[1:]) if len(args)>=2 else None)
+        case "delete"|"del"|"rm":
+            if not args: pr("[red]Usage: delete [file][/red]")
+            else: cmd_delete(a(0))
+        case "rename":
+            if len(args) < 2:
+                pr("[red]Usage: rename [folder] [old_pattern] [new_pattern][/red]")
+                pr("[dim]Example: rename . *.JPG *.jpg[/dim]")
+            elif len(args) == 2: cmd_rename(".", a(0), a(1))
+            else: cmd_rename(a(0), a(1), a(2))
+        case "move"|"mv":
+            if len(args)<2: pr("[red]Usage: move [source] [dest][/red]")
+            else: cmd_move(a(0), a(1))
+        case "duplicate"|"cp"|"copy":
+            if not args: pr("[red]Usage: duplicate [source][/red]")
+            else: cmd_duplicate(a(0), a(1,""))
+        case "sort":               cmd_sort(a(0,""), a(1,"taille"), a(2,"0"))
+        case "open":               cmd_open(a(0,""))
+        case "clip":               cmd_clip(a(0,""))
+        case "redate":             cmd_redate(a(0,""), a(1,"creation"))
+        case "diff":
+            if len(args)<2: pr("[red]Usage: diff [file1] [file2][/red]")
+            else: cmd_diff(a(0), a(1))
+        case "undo":               cmd_undo()
+        case "search":
+            if not args: pr("[red]Usage: search [term][/red]")
+            else: cmd_search(" ".join(args))
+        case "download":
+            if not args: pr("[red]Usage: download [url][/red]")
+            else: cmd_download(a(0,""), a(1,""))
+        case "install":
+            if not args: pr("[red]Usage: install [program][/red]")
+            else: cmd_install(" ".join(args))
+        case "uninstall":
+            if not args: pr("[red]Usage: uninstall [program][/red]")
+            else: cmd_uninstall(" ".join(args))
+        case "exec":
+            if not args: pr("[red]Usage: exec [command][/red]")
+            else: cmd_exec(" ".join(args))
+        case "bookmark"|"bm":      cmd_bookmark(a(0,"list"), a(1,""), a(2,""))
+        case "alias":              cmd_alias(args)
+        case "sudo":               cmd_sudo(args)
+        case "settings":           cmd_settings(args)
+        case "agent":
+            if not args: pr("[red]Usage: agent [instruction][/red]")
+            else: cmd_agent(" ".join(args))
+        case "helpchat":
+            if not args: pr("[red]Usage: helpchat [question][/red]")
+            else: cmd_helpchat(" ".join(args))
+        case "chat":               cmd_chat()
+        case "logs":               cmd_logs(int(args[0]) if args else 30)
+        case "help"|"?":           cmd_help()
+        case "exit"|"quit"|"q":    raise SystemExit
+        case _:
+            cmd_exec(cmd + (" " + " ".join(args) if args else ""))
+
+# ── Prompt label ──────────────────────────────────────────────────────────────
+def label():
+    if _auto_confirm:
+        return "Fennec [SUDO]"
+    return "Fennec"
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 def main():
-    global cwd
+    global cwd, _session
     completer = FennecCompleter()
-    session = PromptSession(
+    _session  = PromptSession(
         history=FileHistory(str(HIST_FILE)),
         completer=completer,
         complete_while_typing=False,
@@ -1385,29 +1995,36 @@ def main():
         style=Style.from_dict({"prompt": "bold ansicyan"}),
         key_bindings=_make_bindings(),
     )
-    pr("[bold cyan]Fennec[/bold cyan]  [dim]agent[/dim] pour agir  [dim]chat[/dim] pour discuter  [dim]help[/dim] pour la liste")
-    log("startup")
+
+    pr("")
+    pr(f"[bold cyan]  🦊 Fennec[/bold cyan]  [dim]v2  —  {MODEL}[/dim]")
+    pr(f"  [dim]{'─'*52}[/dim]")
+    pr(f"  [cyan]agent[/cyan] [dim]<instruction>[/dim]   [cyan]chat[/cyan]   [cyan]help[/cyan]   [cyan]settings[/cyan]   [dim]settings lang {'fr' if LANG=='en' else 'en'}[/dim]")
+    pr("")
+    log("startup", f"lang={LANG} model={MODEL}")
+
     while True:
         try:
-            saisie = session.prompt(HTML(f"<prompt>{label()} > </prompt>")).strip()
+            saisie = _session.prompt(HTML(f"<prompt>{label()} > </prompt>")).strip()
             if not saisie:
                 continue
             try:
                 tokens = shlex.split(saisie, posix=False)
             except ValueError:
                 tokens = saisie.split()
-            tokens = [t.strip("\"'") for t in tokens]
+            tokens = [tok.strip("\"'") for tok in tokens]
             dispatcher(tokens[0].lower(), tokens[1:])
         except KeyboardInterrupt:
-            pr("\n[dim]Ctrl+C — tape exit pour quitter.[/dim]")
+            pr(f"\n[dim]{t('ctrl_c')}[/dim]")
         except EOFError:
             break
         except SystemExit:
-            pr("[dim]Au revoir.[/dim]")
+            pr(f"[dim]{t('goodbye')}[/dim]")
             log("shutdown")
             break
         except Exception as e:
-            console.print(f"[red]Erreur : [/red]", end=""); console.print(str(e), markup=False)
+            console.print(f"[red]{t('error')}[/red]", end="")
+            console.print(str(e), markup=False)
             log("error", str(e))
 
 if __name__ == "__main__":
