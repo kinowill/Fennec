@@ -116,20 +116,21 @@ Double-clique sur **`fennec.bat`** — il installe les dépendances, démarre Ol
 
 ## 💡 Exemples
 
-```bash
-# Agent avec auto-validation
+```
+# Agent avec auto-validation (plus besoin de taper o/n a chaque etape)
 sudo on
-agent trie mes 5 fichiers les plus gros dans Downloads et place-les dans un dossier "Archives" sur le bureau
+agent trie mes 5 fichiers les plus gros dans mes telechargements
+       et place-les dans un dossier "Archives" sur le bureau
 sudo off
 
 # Recherche web
-search météo Montpellier aujourd'hui
+search meteo Montpellier
 
 # Renommage en masse
 rename . *.JPG *.jpg
 rename Photos rapport_* note_*
 
-# Diff de fichiers
+# Comparer deux fichiers
 diff config_old.json config_new.json
 
 # Chat en streaming
