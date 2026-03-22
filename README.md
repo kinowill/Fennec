@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/kinowill/Fennec/main/FENNEC_LOGO.webp" width="160" />
 </p>
 
-<h1 align="center">🦊 Fennec</h1>
+<h1 align="center">Fennec</h1>
 <p align="center"><b>Shell Windows intelligent propulsé par IA locale</b></p>
 <p align="center">Gère tes fichiers, lance des agents autonomes, discute avec Qwen — 100% local, sans cloud, sans clé API.</p>
 
