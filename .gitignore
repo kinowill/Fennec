@@ -37,6 +37,10 @@ geek.exe
 Thumbs.db
 desktop.ini
 
+# Claude Code (contexte local)
+CLAUDE.md
+.claude/
+
 # IDE
 .vscode/
 .idea/

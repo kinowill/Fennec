@@ -232,6 +232,7 @@ Fennec/
 - **Backup automatique** de `fennec_config.json` (rotation atomique)
 - **Protection path traversal** — resolution securisee des chemins
 - **Whitelist agent** — l'agent ne peut utiliser que les outils Fennec approuves
+- **Anti-saturation agent** — `find`/`list` avec beaucoup de resultats envoient un resume compact a Qwen (par dossier) au lieu de la liste brute
 
 > `sudo on` desactive toutes les confirmations. A utiliser pour les agents longs, puis `sudo off` aussitot apres.
 

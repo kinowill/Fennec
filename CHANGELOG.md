@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.2.1] - 2026-03-23
+
+### Fixed
+- **Agent : find/list ne sature plus le contexte Qwen** — les resultats sont cappes a 30 en mode agent, et le feedback envoye a Qwen est un resume par dossier (nombre de fichiers par dossier au lieu de la liste brute des chemins)
+- Import `Counter` deplace au niveau module (au lieu d'etre importe dans la boucle agent)
+
 ## [2.2] - 2026-03-23
 
 ### Security

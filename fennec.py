@@ -24,6 +24,7 @@ import ctypes
 import locale
 import urllib.request
 from pathlib import Path
+from collections import Counter
 from datetime import datetime
 
 try:
@@ -507,7 +508,8 @@ def cmd_find(motif, dossier="", depth=""):
         return
     lbl = "result(s)" if LANG == "en" else "resultat(s)"
     pr(f"[cyan]{len(resultats)} {lbl} - {motif}[/cyan]")
-    cap = 0 if _agent_mode else _FIND_DEFAULT
+    _FIND_AGENT_CAP = 30
+    cap = _FIND_AGENT_CAP if _agent_mode else _FIND_DEFAULT
     for i, r in enumerate(resultats):
         if cap and i >= cap:
             darg = f'"{str(racine)}"' if " " in str(racine) else str(racine)
@@ -1701,9 +1703,29 @@ def cmd_agent(instruction):
             _FB_MAX = 1000
             lines = sortie.splitlines()
             total_lines = len(lines)
-            sortie_fb = sortie[:_FB_MAX]
-            if len(sortie) > _FB_MAX:
-                sortie_fb += f"\n[...truncated, {total_lines} lines total, showing first {len(sortie_fb.splitlines())}]"
+            # Pour find/list avec beaucoup de resultats : resume par dossier
+            if cmd_reel in ("find", "list") and total_lines > 20:
+                dossiers = Counter()
+                for ligne_fb in lines:
+                    ligne_fb = ligne_fb.strip()
+                    if not ligne_fb or ligne_fb.startswith("[") or "resultat" in ligne_fb.lower() or "result" in ligne_fb.lower():
+                        continue
+                    # Extraire le dossier parent du chemin
+                    parts = ligne_fb.rsplit("\\", 1)
+                    if len(parts) == 2:
+                        dossiers[parts[0].strip()] += 1
+                    else:
+                        dossiers["(root)"] += 1
+                resume_lines = [f"{total_lines} files found. Breakdown by folder:"]
+                for dossier, count in dossiers.most_common(15):
+                    resume_lines.append(f"  {dossier} ({count})")
+                if len(dossiers) > 15:
+                    resume_lines.append(f"  ... and {len(dossiers)-15} more folders")
+                sortie_fb = "\n".join(resume_lines)
+            else:
+                sortie_fb = sortie[:_FB_MAX]
+                if len(sortie) > _FB_MAX:
+                    sortie_fb += f"\n[...truncated, {total_lines} lines total, showing first {len(sortie_fb.splitlines())}]"
             feedback = f"Result of {cmd_reel} ({total_lines} lines):\n{sortie_fb}\nYou have the answer. Go to done NOW."
 
         steps_left = max_steps - etape
