@@ -6,12 +6,6 @@ Si tu decouvres une faille de securite dans Fennec, **ne cree pas d'issue publiq
 
 Contacte le mainteneur directement via GitHub ([@kinowill](https://github.com/kinowill)) en message prive ou par email si disponible.
 
-## Delai de reponse
-
-- Accusee de reception sous 48h
-- Evaluation et plan de correction sous 7 jours
-- Patch publie des que possible
-
 ## Perimetre
 
 ### Couvert
