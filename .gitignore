@@ -22,6 +22,8 @@ fennec_config.tmp
 .fennec_history
 .fennec_bookmarks.json
 .fennec_trash/
+.fennec_undo.json
+.env*
 
 # Geek Uninstaller (optionnel, non redistribué)
 geek.exe

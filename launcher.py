@@ -53,7 +53,7 @@ def installer_dependances(py):
 
 def verifier_ollama():
     """Retourne True si ollama est installé."""
-    r = subprocess.run("where ollama", shell=True, capture_output=True)
+    r = subprocess.run(["where", "ollama"], capture_output=True)
     return r.returncode == 0
 
 
@@ -65,7 +65,7 @@ def demarrer_ollama():
         return True  # déjà actif
     except Exception:
         pass
-    subprocess.Popen("ollama serve", shell=True,
+    subprocess.Popen(["ollama", "serve"],
                      creationflags=subprocess.CREATE_NO_WINDOW)
     import time
     for _ in range(8):
@@ -79,12 +79,12 @@ def demarrer_ollama():
 
 
 def verifier_modele():
-    r = subprocess.run("ollama list", shell=True, capture_output=True, text=True)
+    r = subprocess.run(["ollama", "list"], capture_output=True, text=True)
     return "qwen2.5" in r.stdout.lower()
 
 
 def telecharger_modele():
-    subprocess.run("ollama pull qwen2.5:7b", shell=True)
+    subprocess.run(["ollama", "pull", "qwen2.5:7b"])
 
 
 def message_erreur(titre, texte):
