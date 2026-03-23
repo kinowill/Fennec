@@ -172,6 +172,11 @@ _STRINGS = {
         "emptytrash_fennec_confirm":"Vider la corbeille Fennec ({n} element(s)) ? DEFINITIF, undo impossible.",
         "emptytrash_fennec_ok":     "Corbeille Fennec videe : {n} element(s) supprimes definitivement.",
         "emptytrash_computing":     "Vidage corbeille Windows...",
+        "no_matching_files":        "Aucun fichier correspondant.",
+        "folder_created":           "Dossier cree :",
+        "no_bookmarks":             "Aucun favori.",
+        "geek_launch_error":        "Impossible de lancer Geek Uninstaller : ",
+        "rename_done":              "{n} fichier(s) renomme(s).",
     },
     "en": {
         "confirm_prompt":     "Confirm? (y/n):",
@@ -237,6 +242,11 @@ _STRINGS = {
         "emptytrash_fennec_confirm":"Empty Fennec trash ({n} item(s))? PERMANENT, cannot be undone.",
         "emptytrash_fennec_ok":     "Fennec trash emptied: {n} item(s) permanently deleted.",
         "emptytrash_computing":     "Emptying Windows Recycle Bin...",
+        "no_matching_files":        "No matching files.",
+        "folder_created":           "Folder created:",
+        "no_bookmarks":             "No bookmarks.",
+        "geek_launch_error":        "Cannot launch Geek Uninstaller: ",
+        "rename_done":              "{n} file(s) renamed.",
     },
 }
 
@@ -742,7 +752,7 @@ def cmd_rename(dossier, ancien, nouveau):
     pattern_src, n_groups = _glob_to_regex(ancien)
     cibles = [e for e in d.iterdir() if pattern_src.match(e.name)]
     if not cibles:
-        pr("[yellow]No matching files.[/yellow]")
+        pr(f"[yellow]{t('no_matching_files')}[/yellow]")
         return
     for c in cibles:
         nouveau_nom = _appliquer_motif(c.name, pattern_src, nouveau, n_groups)
@@ -765,7 +775,7 @@ def cmd_move(source, dest):
     if not dir_to_create.exists():
         try:
             dir_to_create.mkdir(parents=True, exist_ok=True)
-            console.print(f"[dim]  Dossier cree : {escape(str(dir_to_create))}[/dim]")
+            console.print(f"[dim]  {t('folder_created')} {escape(str(dir_to_create))}[/dim]")
         except Exception as e:
             err(e)
             return
@@ -928,7 +938,7 @@ def cmd_bookmark(action="list", nom="", chemin=""):
     bm = charger_bookmarks()
     if action == "list":
         if not bm:
-            pr("[dim]No bookmarks.[/dim]")
+            pr(f"[dim]{t('no_bookmarks')}[/dim]")
             return
         for k, v in bm.items():
             console.print(f"  [cyan]{escape(k)}[/cyan]  {escape(v)}")
@@ -1872,7 +1882,7 @@ def cmd_uninstall(nom):
             ctypes.windll.shell32.ShellExecuteW(None,"runas",str(GEEK_EXE),None,str(BASE_DIR),1)
             log("geek_uninstaller", nom)
         except Exception as e:
-            console.print("[red]Cannot launch Geek Uninstaller: [/red]", end="")
+            console.print(f"[red]{t('geek_launch_error')}[/red]", end="")
             console.print(str(e), markup=False)
     else:
         pr("[yellow]Tip: place geek.exe next to fennec.py for registry cleanup.[/yellow]")
@@ -2069,10 +2079,10 @@ def cmd_redate(dossier="", mode="creation"):
             tmp.rename(final)
             console.print(f"[green]  {escape(final.name)}[/green]")
         except Exception as e:
-            console.print("[red]  Error: [/red]", end="")
+            console.print(f"[red]  {t('error')}[/red]", end="")
             console.print(str(e), markup=False)
             erreurs += 1
-    pr(f"[bold green]{len(plan)-erreurs} files renamed.[/bold green]")
+    pr(f"[bold green]{t('rename_done', n=len(plan)-erreurs)}[/bold green]")
     if erreurs:
         pr(f"[red]{erreurs} error(s).[/red]")
     log("redate", f"{dp} mode={mode} n={len(plan)}")
