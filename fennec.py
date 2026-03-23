@@ -6,7 +6,7 @@ Optional     : pip install pdfplumber python-docx
 Ollama required : https://ollama.com  (ollama pull qwen2.5:7b)
 """
 
-__version__ = "2.2"
+__version__ = "2.3"
 
 import os
 import io
@@ -70,6 +70,7 @@ _DEFAULT_CONFIG = {
     "lang":            "fr",
     "max_steps":       0,
     "ollama_timeout":  120,
+    "num_ctx":         0,      # 0 = auto (context natif du modele via /api/show)
     "aliases":         {},
 }
 
@@ -106,6 +107,49 @@ _aliases   = dict(_cfg.get("aliases", {}))
 def _timeout():
     """Configurable Ollama timeout (read at call time so settings takes effect immediately)."""
     return int(_cfg.get("ollama_timeout", 120))
+
+# ── Context dynamique selon le modele ────────────────────────────────────────
+_MODEL_CTX_CACHE = {}
+
+def _get_model_ctx(model_name=None):
+    """Retourne le context window effectif du modele (cache, override par num_ctx)."""
+    # Override manuel via settings num_ctx
+    user_ctx = int(_cfg.get("num_ctx", 0))
+    if user_ctx > 0:
+        return user_ctx
+    name = model_name or MODEL
+    if name in _MODEL_CTX_CACHE:
+        return _MODEL_CTX_CACHE[name]
+    try:
+        payload = json.dumps({"name": name}).encode("utf-8")
+        req = urllib.request.Request(
+            f"{OLLAMA_URL}/api/show",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        for k, v in data.get("model_info", {}).items():
+            if "context_length" in k:
+                _MODEL_CTX_CACHE[name] = int(v)
+                return int(v)
+    except Exception:
+        pass
+    _MODEL_CTX_CACHE[name] = 4096  # fallback safe
+    return 4096
+
+def _agent_limits(model_name=None):
+    """Limites agent scalees selon le context window du modele."""
+    ctx = _get_model_ctx(model_name)
+    ratio = ctx / 4096
+    return {
+        "ctx":        ctx,
+        "output_max": min(int(2000 * ratio), 16000),
+        "fb_max":     min(int(1000 * ratio), 8000),
+        "find_cap":   min(int(30 * ratio), 500),
+        "window":     min(int(6 * ratio), 30),
+    }
 
 # ── i18n ──────────────────────────────────────────────────────────────────────
 _STRINGS = {
@@ -178,6 +222,8 @@ _STRINGS = {
         "no_bookmarks":             "Aucun favori.",
         "geek_launch_error":        "Impossible de lancer Geek Uninstaller : ",
         "rename_done":              "{n} fichier(s) renomme(s).",
+        "setting_saved":            "Enregistre :",
+        "num_ctx_invalid":          "num_ctx doit etre un entier (0 = auto).",
     },
     "en": {
         "confirm_prompt":     "Confirm? (y/n):",
@@ -248,6 +294,8 @@ _STRINGS = {
         "no_bookmarks":             "No bookmarks.",
         "geek_launch_error":        "Cannot launch Geek Uninstaller: ",
         "rename_done":              "{n} file(s) renamed.",
+        "setting_saved":            "Saved:",
+        "num_ctx_invalid":          "num_ctx must be an integer (0 = auto).",
     },
 }
 
@@ -378,6 +426,8 @@ def appel_chat(messages, fmt_json=False):
         "messages": messages,
         "stream":   False,
     }
+    if _agent_mode:
+        body["options"] = {"num_ctx": _get_model_ctx()}
     if fmt_json:
         body["format"] = "json"
     payload = json.dumps(body).encode("utf-8")
@@ -508,8 +558,7 @@ def cmd_find(motif, dossier="", depth=""):
         return
     lbl = "result(s)" if LANG == "en" else "resultat(s)"
     pr(f"[cyan]{len(resultats)} {lbl} - {motif}[/cyan]")
-    _FIND_AGENT_CAP = 30
-    cap = _FIND_AGENT_CAP if _agent_mode else _FIND_DEFAULT
+    cap = _agent_limits()["find_cap"] if _agent_mode else _FIND_DEFAULT
     for i, r in enumerate(resultats):
         if cap and i >= cap:
             darg = f'"{str(racine)}"' if " " in str(racine) else str(racine)
@@ -1022,6 +1071,16 @@ def cmd_settings(args):
             return
         cfg["model"] = val
         MODEL = val
+        _MODEL_CTX_CACHE.clear()
+    elif key == "num_ctx":
+        try:
+            cfg["num_ctx"] = max(0, int(val))
+            _MODEL_CTX_CACHE.clear()
+            ctx_lbl = f"auto ({_get_model_ctx()})" if cfg["num_ctx"] == 0 else str(cfg["num_ctx"])
+            pr(f"[green]{t('setting_saved')} num_ctx = {ctx_lbl}[/green]")
+        except ValueError:
+            pr(f"[red]{t('num_ctx_invalid')}[/red]")
+        return
     elif key == "ollama_url":
         cfg["ollama_url"] = val
         OLLAMA_URL = val
@@ -1391,10 +1450,8 @@ def _executer_outil(cmd, args):
 
     sortie = buf.getvalue().strip()
     # ── Tronquer la sortie renvoyée à l'agent ────────────────────────────────
-    # qwen2.5:7b a un contexte de 4096 tokens. Une sortie trop longue (ex: list
-    # d'un dossier avec 500 fichiers) sature le contexte et fait perdre les règles
-    # au modèle. On tronque à 2000 chars et on indique explicitement la troncature.
-    _AGENT_OUTPUT_MAX = 2000
+    # Limites scalees dynamiquement selon le context window du modele.
+    _AGENT_OUTPUT_MAX = _agent_limits()["output_max"]
     if len(sortie) > _AGENT_OUTPUT_MAX:
         sortie_tronquee = sortie[:_AGENT_OUTPUT_MAX]
         nb_lignes_total = sortie.count("\n") + 1
@@ -1450,6 +1507,9 @@ def cmd_agent(instruction):
     bureau    = home / "Desktop"
     downloads = home / "Downloads"
 
+    _limits = _agent_limits()
+    _ctx_info = f"[dim]  [{MODEL} | {_limits['ctx']} ctx][/dim]"
+
     if _auto_confirm:
         max_steps = _MAX_STEPS_ABSOLU_SUDO
         console.print(f"[dim][bold yellow]SUDO[/bold yellow] — {t('agent_complexity', n=max_steps)} (no restrictions)[/dim]")
@@ -1464,6 +1524,7 @@ def cmd_agent(instruction):
                 prog.add_task("")
                 max_steps = _estimer_steps(instruction)
             console.print(f"[dim]{t('agent_complexity', n=max_steps)}[/dim]")
+    console.print(_ctx_info)
 
     if LANG == "en":
         system = (
@@ -1572,10 +1633,10 @@ def cmd_agent(instruction):
     while etape < max_steps:
         etape += 1
         # ── Fenêtrage du contexte ────────────────────────────────────────────
-        # qwen2.5:7b dispose de 4096 tokens. On garde toujours :
+        # Fenetrage dynamique selon le context window du modele.
         #   [0] = system prompt  [1] = instruction utilisateur
-        #   + les N derniers échanges (assistant+user)
-        _WINDOW = 6   # nb de paires (assistant+user) conservées
+        #   + les N derniers echanges (assistant+user)
+        _WINDOW = _agent_limits()["window"]
         if len(messages) > 2 + _WINDOW * 2:
             messages = messages[:2] + messages[-(  _WINDOW * 2):]
         with Progress(SpinnerColumn(),
@@ -1699,8 +1760,8 @@ def cmd_agent(instruction):
         if not sortie or sortie in ("(command executed)","(commande executee)"):
             feedback = f"Command {cmd_reel} executed successfully."
         else:
-            # Tronquer le feedback pour proteger le contexte de qwen:7b (4096 tokens)
-            _FB_MAX = 1000
+            # Tronquer le feedback — limites scalees selon le context du modele
+            _FB_MAX = _agent_limits()["fb_max"]
             lines = sortie.splitlines()
             total_lines = len(lines)
             # Pour find/list avec beaucoup de resultats : resume par dossier

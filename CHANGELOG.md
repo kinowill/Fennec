@@ -1,10 +1,18 @@
 # Changelog
 
-## [2.2.1] - 2026-03-23
+## [2.3] - 2026-03-23
+
+### Added
+- **Limites agent dynamiques** — les limites de l'agent (feedback, output, find cap, sliding window) sont scalees automatiquement selon le context window du modele Ollama selectionne
+- Nouvelle fonction `_get_model_ctx()` — interroge `/api/show` pour recuperer le context natif du modele (cache + fallback 4096)
+- `settings num_ctx N` — override manuel du context window (0 = auto depuis le modele)
+- Affichage `[model | ctx]` au lancement de l'agent
+- `num_ctx` passe a Ollama via `options.num_ctx` pour utiliser le contexte complet du modele
+- 2 cles i18n ajoutees : `setting_saved`, `num_ctx_invalid`
 
 ### Fixed
-- **Agent : find/list ne sature plus le contexte Qwen** — les resultats sont cappes a 30 en mode agent, et le feedback envoye a Qwen est un resume par dossier (nombre de fichiers par dossier au lieu de la liste brute des chemins)
-- Import `Counter` deplace au niveau module (au lieu d'etre importe dans la boucle agent)
+- **Agent : find/list ne sature plus le contexte Qwen** — les resultats sont cappes dynamiquement, et le feedback est un resume par dossier quand >20 resultats
+- Import `Counter` deplace au niveau module
 
 ## [2.2] - 2026-03-23
 

@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/Windows-10%2F11-0078D6?style=flat-square&logo=windows" />
   <img src="https://img.shields.io/badge/100%25-Local-green?style=flat-square" />
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" />
-  <img src="https://img.shields.io/badge/version-2.2-cyan?style=flat-square" />
+  <img src="https://img.shields.io/badge/version-2.3-cyan?style=flat-square" />
 </p>
 
 ---
@@ -192,6 +192,7 @@ settings lang en
 | `lang` | Langue de l'interface (`fr` ou `en`) |
 | `max_steps` | Etapes max pour l'agent (`0` = auto via Qwen) |
 | `ollama_timeout` | Timeout Ollama en secondes (defaut : 120) |
+| `num_ctx` | Context window Ollama (`0` = auto depuis le modele). Les limites agent sont scalees automatiquement |
 | `aliases` | Raccourcis de commandes |
 
 ---
