@@ -1267,10 +1267,28 @@ def cmd_history(n=30):
         console.print(f"  [dim]{i:3}[/dim]  {escape(cmd)}")
 
 # ── Agent tool path resolver ──────────────────────────────────────────────────
+def _fix_spaces(path_str, _depth=0):
+    """Recover paths where Qwen split 'folder name' into folder\\name."""
+    if _depth > 5:
+        return path_str
+    p = Path(path_str)
+    if p.exists():
+        return path_str
+    parts = list(p.parts)
+    for i in range(len(parts) - 2, 0, -1):
+        merged = parts[:i] + [parts[i] + " " + parts[i + 1]] + parts[i + 2:]
+        candidate = Path(*merged) if len(merged) > 1 else Path(merged[0])
+        if candidate.exists():
+            return str(candidate)
+        result = _fix_spaces(str(candidate), _depth + 1)
+        if Path(result).exists():
+            return result
+    return path_str
+
 def _resoudre_args_agent(cmd, args):
     """Resolve relative paths to absolute for agent tool calls."""
-    FILE_CMDS = {"move","delete","read","open","clip","duplicate","rename","summary"}
-    if cmd not in FILE_CMDS or not args:
+    PATH_CMDS = {"list","ls","find","sort","move","delete","read","open","clip","duplicate","rename","summary"}
+    if cmd not in PATH_CMDS or not args:
         return args
     home        = Path.home()
     desktop     = home / "Desktop"
@@ -1291,7 +1309,11 @@ def _resoudre_args_agent(cmd, args):
         if clean != parts:
             p = Path(*clean) if len(clean) > 1 else Path(clean[0])
         if p.is_absolute():
-            return str(p)
+            if p.exists():
+                return str(p)
+            # Heuristic: Qwen often splits "folder name" into folder\name.
+            # Try merging adjacent segments with spaces to recover the path.
+            return _fix_spaces(str(p))
         if is_dest:
             return str(p)
         for d in search_dirs:
