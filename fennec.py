@@ -1697,12 +1697,14 @@ def cmd_agent(instruction):
         if not sortie or sortie in ("(command executed)","(commande executee)"):
             feedback = f"Command {cmd_reel} executed successfully."
         else:
-            # Tronquer le feedback à 1500 chars pour protéger le contexte de qwen:7b
-            _FB_MAX = 1500
-            sortie_fb = sortie[:_FB_MAX] + (
-                f"\n[...tronque a {_FB_MAX} chars]" if len(sortie) > _FB_MAX else ""
-            )
-            feedback = f"Result of {cmd_reel}:\n{sortie_fb}"
+            # Tronquer le feedback pour proteger le contexte de qwen:7b (4096 tokens)
+            _FB_MAX = 1000
+            lines = sortie.splitlines()
+            total_lines = len(lines)
+            sortie_fb = sortie[:_FB_MAX]
+            if len(sortie) > _FB_MAX:
+                sortie_fb += f"\n[...truncated, {total_lines} lines total, showing first {len(sortie_fb.splitlines())}]"
+            feedback = f"Result of {cmd_reel} ({total_lines} lines):\n{sortie_fb}\nYou have the answer. Go to done NOW."
 
         steps_left = max_steps - etape
         if steps_left <= 3 and steps_left > 0:
