@@ -1,0 +1,6 @@
+rich>=13.0
+prompt_toolkit>=3.0
+
+# Optional — PDF and DOCX reading
+pdfplumber>=0.9
+python-docx>=0.8
