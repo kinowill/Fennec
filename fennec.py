@@ -257,7 +257,7 @@ def t(key, **kw):
 # ── Agent whitelist ───────────────────────────────────────────────────────────
 AGENT_CMDS_VALIDES = {"list","ls","find","sort","read","open","cd","exec",
                       "delete","move","duplicate","clip","rename","write","summary",
-                      "emptytrash"}
+                      "emptytrash","search"}
 
 # ── State ─────────────────────────────────────────────────────────────────────
 console        = Console(highlight=False)
@@ -1494,9 +1494,11 @@ def cmd_agent(instruction):
             "  move      args:[source_path, destination_path] -> move ONE file\n"
             "  duplicate args:[source]               -> copy\n"
             "  clip      args:[path]                 -> copy path to clipboard\n"
+            "  search    args:[query]                -> web search via DuckDuckGo + AI summary. USE THIS for weather, news, web info.\n"
             "  emptytrash args:[fennec|windows]      -> empty Fennec trash or Windows Recycle Bin\n"
             "    IMPORTANT: to empty the Windows Recycle Bin / corbeille Windows:\n"
-            "      emptytrash args:[windows]   (DO NOT use exec/powershell/rd for this)\n\n"
+            "      emptytrash args:[windows]   (DO NOT use exec/powershell/rd for this)\n"
+            "    IMPORTANT: for ANY web/internet question (weather, news, definitions...) use search, NEVER exec with curl/powershell/Invoke-RestMethod.\n\n"
             "REQUIRED format at each step:\n"
             "{\"action\":\"tool\",\"cmd\":\"<TOOL>\",\"args\":[\"arg1\"],\"reason\":\"...\"}\n"
             "When you have the final answer:\n"
@@ -1535,9 +1537,11 @@ def cmd_agent(instruction):
             "  move      args:[chemin_source, chemin_destination] -> deplace ET renomme si besoin\n"
             "  duplicate args:[source]                    -> copie\n"
             "  clip      args:[chemin]                    -> chemin dans presse-papier\n"
+            "  search    args:[requete]                   -> recherche web DuckDuckGo + resume IA. UTILISER pour meteo, actus, infos web.\n"
             "  emptytrash args:[fennec|windows]           -> vide la corbeille Fennec ou la corbeille Windows\n"
             "    IMPORTANT : pour vider la corbeille Windows :\n"
-            "      emptytrash args:[windows]   (NE PAS utiliser exec/powershell/rd pour ca)\n\n"
+            "      emptytrash args:[windows]   (NE PAS utiliser exec/powershell/rd pour ca)\n"
+            "    IMPORTANT : pour TOUTE question web/internet (meteo, actus, definitions...) utilise search, JAMAIS exec avec curl/powershell/Invoke-RestMethod.\n\n"
             "Format OBLIGATOIRE a chaque etape :\n"
             "{\"action\":\"tool\",\"cmd\":\"<OUTIL>\",\"args\":[\"arg1\"],\"reason\":\"...\"}\n"
             "Quand tu as la reponse finale :\n"
