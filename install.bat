@@ -129,11 +129,6 @@ echo.
 echo   [OK] Le dossier sera supprime automatiquement.
 echo   [OK] Folder will be deleted automatically.
 echo.
-REM Creer un .bat temporaire qui attend que ce process libere le lock, puis supprime.
-set "TMPBAT=%TEMP%\fennec_cleanup_%RANDOM%.bat"
-echo @echo off> "%TMPBAT%"
-echo timeout /t 3 /nobreak ^>nul>> "%TMPBAT%"
-echo rmdir /s /q "%SRC%" 2^>nul>> "%TMPBAT%"
-echo del "%%~f0">> "%TMPBAT%"
-start "" /min "%TMPBAT%"
+REM Lancer PowerShell en process separe : attend 3s puis supprime le dossier source.
+start "" /min powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep 3; Remove-Item -LiteralPath '%SRC%' -Recurse -Force"
 exit
