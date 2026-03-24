@@ -1,9 +1,9 @@
 @echo off
 setlocal
 title Fennec - Desinstallation
-chcp 65001 > nul 2>&1
 
 set "DEST=%LocalAppData%\Fennec"
+set "DATADIR=%LocalAppData%\Fennec"
 set "SHORTCUT=%USERPROFILE%\Desktop\Fennec.lnk"
 
 echo.
@@ -12,6 +12,7 @@ echo     Fennec - Desinstallation
 echo   ==============================
 echo.
 echo   Dossier  : %DEST%
+echo   Donnees  : %DATADIR%
 echo   Raccourci: %SHORTCUT%
 echo.
 
@@ -26,7 +27,7 @@ if /i not "%CONFIRM%"=="o" (
 
 echo.
 
-:: Suppression raccourci
+REM Suppression raccourci
 if exist "%SHORTCUT%" (
     del "%SHORTCUT%"
     echo   [OK] Raccourci bureau supprime.
@@ -34,7 +35,7 @@ if exist "%SHORTCUT%" (
     echo   [--] Raccourci non trouve.
 )
 
-:: Suppression dossier
+REM Suppression dossier
 if exist "%DEST%" (
     rmdir /s /q "%DEST%"
     if exist "%DEST%" (

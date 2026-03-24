@@ -49,7 +49,11 @@ except ImportError:
 _enc = locale.getpreferredencoding(False) or "utf-8"
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-BASE_DIR       = Path(__file__).parent
+# Donnees utilisateur dans %LocalAppData%\Fennec (toujours writable).
+# Le code (.py) peut etre ailleurs (System32, Program Files, etc.).
+_APPDATA_DIR   = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "Fennec"
+_APPDATA_DIR.mkdir(exist_ok=True)
+BASE_DIR       = _APPDATA_DIR
 LOG_FILE       = BASE_DIR / "fennec_logs.txt"
 HIST_FILE      = BASE_DIR / ".fennec_history"
 BOOKMARKS_FILE = BASE_DIR / ".fennec_bookmarks.json"
