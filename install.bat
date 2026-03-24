@@ -104,9 +104,11 @@ REM --- Proposer de supprimer le dossier source ---
 echo   ------------------------------------------------
 echo   Ce dossier n'est plus necessaire.
 echo   Fennec est installe dans %DEST%.
+echo   Pour mettre a jour, il faudra re-cloner le projet.
 echo.
 echo   This folder is no longer needed.
 echo   Fennec is installed in %DEST%.
+echo   To update, you will need to re-clone the project.
 echo   ------------------------------------------------
 echo.
 set /p CLEANUP="  Supprimer ce dossier source ? / Delete this source folder? (o/y/N) : "
