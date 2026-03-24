@@ -40,10 +40,10 @@ echo   [OK] %DEST%
 
 REM --- [3/6] Copie des fichiers ---
 echo   [3/6] Copie des fichiers...
-copy /y "%SRC%fennec.py" "%DEST%\" > nul
-copy /y "%SRC%launcher.py" "%DEST%\" > nul
-copy /y "%SRC%fennec.bat" "%DEST%\" > nul
-copy /y "%SRC%requirements.txt" "%DEST%\" > nul
+copy /y "%SRC%src\fennec.py" "%DEST%\" > nul
+copy /y "%SRC%src\launcher.py" "%DEST%\" > nul
+copy /y "%SRC%src\fennec.bat" "%DEST%\" > nul
+copy /y "%SRC%src\requirements.txt" "%DEST%\" > nul
 copy /y "%SRC%FENNEC_LOGO.webp" "%DEST%\" > nul
 copy /y "%SRC%uninstall.bat" "%DEST%\" > nul
 echo   [OK] 6 fichiers copies.

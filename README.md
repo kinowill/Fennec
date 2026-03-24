@@ -203,17 +203,23 @@ settings lang en
 
 ```
 Fennec/
-├── fennec.py          # Application principale (~2570 lignes)
-├── launcher.py        # Lanceur GUI (compile en .exe avec PyInstaller)
-├── fennec.bat         # Lanceur Windows avec auto-install des dependances
-├── fennec_config.json # Configuration (cree au premier lancement)
-├── fennec_logs.txt    # Logs des actions
+├── install.bat        # Installeur (double-cliquer pour installer)
+├── uninstall.bat      # Desinstalleur
 ├── FENNEC_LOGO.webp   # Logo
+├── README.md
 ├── LICENSE
-└── README.md
+└── src/
+    ├── fennec.py      # Application principale (~2700 lignes)
+    ├── launcher.py    # Lanceur GUI (compile en .exe avec PyInstaller)
+    ├── fennec.bat     # Lanceur Windows avec auto-install des dependances
+    └── requirements.txt
 ```
 
-**Fichiers crees automatiquement (ignores par git) :**
+**Dossier d'installation** : `%LocalAppData%\Fennec\`
+
+**Fichiers crees automatiquement (dans %LocalAppData%\Fennec) :**
+- `fennec_config.json` — configuration
+- `fennec_logs.txt` — logs des actions
 - `.fennec_history` — historique des commandes
 - `.fennec_bookmarks.json` — favoris
 - `.fennec_trash/` — corbeille interne
