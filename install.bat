@@ -129,6 +129,11 @@ echo.
 echo   [OK] Le dossier sera supprime automatiquement.
 echo   [OK] Folder will be deleted automatically.
 echo.
-REM PowerShell en process separe : attend 3s puis supprime le dossier source.
-start "" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep 3; Remove-Item -LiteralPath '%SRC%' -Recurse -Force"
+REM Creer un .bat temporaire qui attend 3s puis supprime le dossier source.
+set "TMPBAT=%TEMP%\fennec_cleanup.bat"
+>"%TMPBAT%" echo @echo off
+>>"%TMPBAT%" echo timeout /t 3 /nobreak ^>nul
+>>"%TMPBAT%" echo rmdir /s /q "%SRC%"
+>>"%TMPBAT%" echo del "%%~f0"
+start "" /min "%TMPBAT%"
 exit
