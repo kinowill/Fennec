@@ -1,8 +1,9 @@
 # Changelog
 
-## [2.3] - 2026-03-23
+## [2.3] - 2026-03-24
 
 ### Added
+- **Installeur propre** — `install.bat` installe Fennec dans `%LocalAppData%\Fennec` avec venv, icone et raccourci bureau. `uninstall.bat` pour desinstaller proprement.
 - **Limites agent dynamiques** — les limites de l'agent (feedback, output, find cap, sliding window) sont scalees automatiquement selon le context window du modele Ollama selectionne
 - Nouvelle fonction `_get_model_ctx()` — interroge `/api/show` pour recuperer le context natif du modele (cache + fallback 4096)
 - `settings num_ctx N` — override manuel du context window (0 = auto depuis le modele)

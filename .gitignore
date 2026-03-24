@@ -14,7 +14,8 @@ build/
 venv/
 env/
 
-# Fennec — fichiers générés automatiquement
+# Fennec — fichiers generes automatiquement
+fennec.ico
 fennec_logs.txt
 fennec_config.json
 fennec_config.bak

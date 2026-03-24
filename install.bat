@@ -1,0 +1,106 @@
+@echo off
+setlocal enabledelayedexpansion
+title Fennec - Installation
+chcp 65001 > nul 2>&1
+
+echo.
+echo   ==============================
+echo     Fennec - Installation
+echo   ==============================
+echo.
+
+set "SRC=%~dp0"
+set "DEST=%LocalAppData%\Fennec"
+set "VENV=%DEST%\.venv"
+set "DESKTOP=%USERPROFILE%\Desktop"
+
+:: ── [1/6] Verification Python ────────────────────────────────────────────────
+echo   [1/6] Verification de Python...
+python --version > nul 2>&1
+if %errorlevel% neq 0 (
+    echo.
+    echo   [ERREUR] Python introuvable.
+    echo   Installe Python 3.10+ depuis https://python.org
+    echo   Coche "Add Python to PATH" pendant l'installation.
+    echo.
+    pause
+    exit /b 1
+)
+for /f "tokens=2" %%v in ('python --version 2^>^&1') do set "PYVER=%%v"
+echo   [OK] Python %PYVER% detecte.
+
+:: ── [2/6] Creation du dossier ────────────────────────────────────────────────
+echo   [2/6] Creation du dossier d'installation...
+if not exist "%DEST%" mkdir "%DEST%"
+if %errorlevel% neq 0 (
+    echo   [ERREUR] Impossible de creer %DEST%
+    pause
+    exit /b 1
+)
+echo   [OK] %DEST%
+
+:: ── [3/6] Copie des fichiers ─────────────────────────────────────────────────
+echo   [3/6] Copie des fichiers...
+copy /y "%SRC%fennec.py" "%DEST%\" > nul
+copy /y "%SRC%launcher.py" "%DEST%\" > nul
+copy /y "%SRC%fennec.bat" "%DEST%\" > nul
+copy /y "%SRC%requirements.txt" "%DEST%\" > nul
+copy /y "%SRC%FENNEC_LOGO.webp" "%DEST%\" > nul
+copy /y "%SRC%uninstall.bat" "%DEST%\" > nul
+echo   [OK] 6 fichiers copies.
+
+:: ── [4/6] Environnement virtuel + dependances ────────────────────────────────
+echo   [4/6] Creation de l'environnement virtuel...
+if not exist "%VENV%\Scripts\python.exe" (
+    python -m venv "%VENV%"
+    if %errorlevel% neq 0 (
+        echo   [ERREUR] Impossible de creer le venv.
+        pause
+        exit /b 1
+    )
+)
+set "VPYTHON=%VENV%\Scripts\python.exe"
+echo          Installation des dependances...
+"%VPYTHON%" -m pip install --upgrade pip --quiet > nul 2>&1
+"%VPYTHON%" -m pip install -r "%DEST%\requirements.txt" --quiet > nul 2>&1
+if %errorlevel% neq 0 (
+    echo   [ERREUR] Impossible d'installer les dependances.
+    pause
+    exit /b 1
+)
+:: Pillow pour la conversion du logo
+"%VPYTHON%" -m pip install Pillow --quiet > nul 2>&1
+echo   [OK] Dependances installees.
+
+:: ── [5/6] Creation de l'icone ────────────────────────────────────────────────
+echo   [5/6] Creation de l'icone...
+"%VPYTHON%" -c "from PIL import Image; img = Image.open(r'%DEST%\FENNEC_LOGO.webp').convert('RGBA'); img.save(r'%DEST%\fennec.ico', format='ICO', sizes=[(256,256),(128,128),(64,64),(48,48),(32,32),(16,16)])" 2> nul
+if %errorlevel% neq 0 (
+    echo   [ATTENTION] Conversion du logo echouee, raccourci sans icone personnalisee.
+) else (
+    echo   [OK] fennec.ico cree.
+)
+
+:: ── [6/6] Raccourci bureau ───────────────────────────────────────────────────
+echo   [6/6] Creation du raccourci bureau...
+powershell -NoProfile -Command ^
+    "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%DESKTOP%\Fennec.lnk'); $s.TargetPath = '%DEST%\fennec.bat'; $s.WorkingDirectory = '%USERPROFILE%'; $s.IconLocation = '%DEST%\fennec.ico,0'; $s.Description = 'Fennec - Shell IA Windows'; $s.Save()" 2> nul
+if %errorlevel% neq 0 (
+    echo   [ATTENTION] Impossible de creer le raccourci.
+) else (
+    echo   [OK] Raccourci "Fennec" cree sur le bureau.
+)
+
+:: ── Termine ──────────────────────────────────────────────────────────────────
+echo.
+echo   ======================================
+echo     Fennec installe avec succes !
+echo   ======================================
+echo.
+echo   Dossier  : %DEST%
+echo   Raccourci: %DESKTOP%\Fennec.lnk
+echo.
+echo   Lance Fennec depuis le raccourci
+echo   sur ton bureau.
+echo.
+pause

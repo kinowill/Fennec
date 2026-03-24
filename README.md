@@ -28,9 +28,11 @@ git clone https://github.com/kinowill/Fennec.git
 cd Fennec
 ```
 
-Double-clique sur **`fennec.bat`** — il installe les dependances, demarre Ollama et telecharge le modele automatiquement.
+Double-clique sur **`install.bat`** — il installe Fennec dans `%LocalAppData%\Fennec`, cree un raccourci bureau avec icone, et configure tout automatiquement.
 
 > Le premier lancement telecharge `qwen2.5:7b` (~4.7 Go). Les suivants sont instantanes.
+
+Pour desinstaller : lance `uninstall.bat` (disponible dans le dossier d'installation ou le repo).
 
 ---
 
