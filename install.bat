@@ -9,6 +9,8 @@ echo   ==============================
 echo.
 
 set "SRC=%~dp0"
+REM Retirer le trailing backslash pour eviter les problemes de guillemets
+if "%SRC:~-1%"=="\" set "SRC=%SRC:~0,-1%"
 set "DEST=%LocalAppData%\Fennec"
 set "VENV=%DEST%\.venv"
 set "DESKTOP=%USERPROFILE%\Desktop"
@@ -40,12 +42,12 @@ echo   [OK] %DEST%
 
 REM --- [3/6] Copie des fichiers ---
 echo   [3/6] Copie des fichiers...
-copy /y "%SRC%src\fennec.py" "%DEST%\" > nul
-copy /y "%SRC%src\launcher.py" "%DEST%\" > nul
-copy /y "%SRC%src\fennec.bat" "%DEST%\" > nul
-copy /y "%SRC%src\requirements.txt" "%DEST%\" > nul
-copy /y "%SRC%FENNEC_LOGO.webp" "%DEST%\" > nul
-copy /y "%SRC%uninstall.bat" "%DEST%\" > nul
+copy /y "%SRC%\src\fennec.py" "%DEST%\" > nul
+copy /y "%SRC%\src\launcher.py" "%DEST%\" > nul
+copy /y "%SRC%\src\fennec.bat" "%DEST%\" > nul
+copy /y "%SRC%\src\requirements.txt" "%DEST%\" > nul
+copy /y "%SRC%\FENNEC_LOGO.webp" "%DEST%\" > nul
+copy /y "%SRC%\uninstall.bat" "%DEST%\" > nul
 echo   [OK] 6 fichiers copies.
 
 REM --- [4/6] Environnement virtuel + dependances ---
@@ -124,9 +126,14 @@ exit /b 0
 
 :do_cleanup
 echo.
-echo   [OK] Le dossier sera supprime apres fermeture.
-echo   [OK] Folder will be deleted after closing.
+echo   [OK] Le dossier sera supprime automatiquement.
+echo   [OK] Folder will be deleted automatically.
 echo.
-REM PowerShell en fenetre cachee : attend 2s (que cmd libere le lock) puis supprime.
-start "" /min powershell -WindowStyle Hidden -NoProfile -Command "Start-Sleep 2; Remove-Item -Recurse -Force '%SRC%' -ErrorAction SilentlyContinue"
-exit /b 0
+REM Creer un .bat temporaire qui attend que ce process libere le lock, puis supprime.
+set "TMPBAT=%TEMP%\fennec_cleanup_%RANDOM%.bat"
+echo @echo off> "%TMPBAT%"
+echo timeout /t 3 /nobreak ^>nul>> "%TMPBAT%"
+echo rmdir /s /q "%SRC%" 2^>nul>> "%TMPBAT%"
+echo del "%%~f0">> "%TMPBAT%"
+start "" /min "%TMPBAT%"
+exit
