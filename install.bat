@@ -124,13 +124,9 @@ exit /b 0
 
 :do_cleanup
 echo.
-echo   Suppression en cours... / Deleting...
-echo   [OK] Le dossier sera supprime a la fermeture.
-echo   [OK] Folder will be deleted on close.
+echo   [OK] Le dossier sera supprime apres fermeture.
+echo   [OK] Folder will be deleted after closing.
 echo.
-pause
-REM Le bat tourne depuis SRC, donc on ne peut pas rmdir pendant l'execution.
-REM On lance un process detache qui attend 1s puis supprime.
-cd /d "%USERPROFILE%"
-start "" /b cmd /c "timeout /t 1 /nobreak >nul & rmdir /s /q "%SRC%" 2>nul"
+REM PowerShell en fenetre cachee : attend 2s (que cmd libere le lock) puis supprime.
+start "" /min powershell -WindowStyle Hidden -NoProfile -Command "Start-Sleep 2; Remove-Item -Recurse -Force '%SRC%' -ErrorAction SilentlyContinue"
 exit /b 0
