@@ -24,7 +24,6 @@ import ctypes
 import locale
 import urllib.request
 from pathlib import Path
-from collections import Counter
 from datetime import datetime
 
 try:
@@ -1555,7 +1554,7 @@ def cmd_agent(instruction):
             "- If the task needs more steps than planned, add \"need_more\":true in EACH tool reply until ALL done.\n\n"
             "Available tools (cmd = exactly this name):\n"
             "  list      args:[folder]               -> list files and folders\n"
-            "  find      args:[glob_pattern, folder] -> search e.g. *.pdf\n"
+            "  find      args:[glob_pattern, folder] -> search e.g. *.pdf or multi-pattern: *.mp4;*.avi;*.mkv\n"
             "  sort      args:[folder, size|date|taille_asc|date_asc, n?] -> sort desc by default. Use taille_asc for smallest-first. n=limit (e.g. 5)\n"
             "  read      args:[file]                 -> read a file\n"
             "  summary   args:[file]                 -> AI summary of a file (PDF, DOCX, TXT...)\n"
@@ -1600,7 +1599,7 @@ def cmd_agent(instruction):
             "- Si la tache necessite plus d'etapes que prevu, ajoute \"need_more\":true dans CHAQUE reponse tool jusqu'a avoir fini.\n\n"
             "Outils disponibles (cmd = exactement ce nom) :\n"
             "  list      args:[dossier]                  -> liste fichiers et dossiers\n"
-            "  find      args:[motif_glob, dossier]       -> cherche ex: *.pdf\n"
+            "  find      args:[motif_glob, dossier]       -> cherche ex: *.pdf ou multi-motif: *.mp4;*.avi;*.mkv\n"
             "  sort      args:[dossier, taille|date|taille_asc|date_asc, n?] -> tri desc par defaut. taille_asc = plus petits en premier. n=limite (ex: 5)\n"
             "  read      args:[fichier]                   -> lit un fichier\n"
             "  summary   args:[fichier]                   -> resume IA d'un fichier (PDF, DOCX, TXT...)\n"
