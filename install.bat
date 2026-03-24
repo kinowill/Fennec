@@ -125,14 +125,12 @@ exit /b 0
 :do_cleanup
 echo.
 echo   Suppression en cours... / Deleting...
-cd /d "%USERPROFILE%"
-rmdir /s /q "%SRC%" 2>nul
-if exist "%SRC%" (
-    echo   [ATTENTION] Impossible de supprimer completement.
-    echo   Certains fichiers sont peut-etre en cours d'utilisation.
-    echo   [WARNING] Could not fully delete. Some files may be in use.
-) else (
-    echo   [OK] Dossier source supprime. / Source folder deleted.
-)
+echo   [OK] Le dossier sera supprime a la fermeture.
+echo   [OK] Folder will be deleted on close.
 echo.
 pause
+REM Le bat tourne depuis SRC, donc on ne peut pas rmdir pendant l'execution.
+REM On lance un process detache qui attend 1s puis supprime.
+cd /d "%USERPROFILE%"
+start "" /b cmd /c "timeout /t 1 /nobreak >nul & rmdir /s /q "%SRC%" 2>nul"
+exit /b 0
