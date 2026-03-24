@@ -131,8 +131,8 @@ echo   [OK] Folder will be deleted automatically.
 echo.
 REM Ecrire un script PowerShell temporaire puis le lancer en arriere-plan.
 set "TMPPS=%TEMP%\fennec_cleanup.ps1"
-echo Start-Sleep 3> "%TMPPS%"
-echo Remove-Item -LiteralPath '%SRC%' -Recurse -Force -ErrorAction SilentlyContinue>> "%TMPPS%"
-echo Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force>> "%TMPPS%"
+>"%TMPPS%" echo Start-Sleep 3
+>>"%TMPPS%" echo Remove-Item -LiteralPath '%SRC%' -Recurse -Force -ErrorAction SilentlyContinue
+>>"%TMPPS%" echo Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force
 start "" /min powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TMPPS%"
 exit
