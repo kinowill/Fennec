@@ -546,15 +546,17 @@ def cmd_find(motif, dossier="", depth=""):
     spin_txt = "[cyan]Searching..." if LANG == "en" else "[cyan]Recherche..."
     with Progress(SpinnerColumn(), TextColumn(spin_txt), transient=True) as prog:
         prog.add_task("")
+        # Support multi-patterns separes par ";" (ex: "*.mp4;*.avi;*.mkv")
+        motifs = [m.strip() for m in motif.split(";") if m.strip()]
         for root, dirs, files in os.walk(racine):
             cur_depth = len(Path(root).relative_to(racine).parts)
             if max_depth is not None and cur_depth >= max_depth:
                 dirs.clear()
             for name in files:
-                if fnmatch.fnmatch(name, motif):
+                if any(fnmatch.fnmatch(name, m) for m in motifs):
                     resultats.append(Path(root) / name)
             for name in dirs:
-                if fnmatch.fnmatch(name, motif):
+                if any(fnmatch.fnmatch(name, m) for m in motifs):
                     resultats.append(Path(root) / name)
     resultats.sort()
     if not resultats:
@@ -1768,24 +1770,19 @@ def cmd_agent(instruction):
             _FB_MAX = _agent_limits()["fb_max"]
             lines = sortie.splitlines()
             total_lines = len(lines)
-            # Pour find/list avec beaucoup de resultats : resume par dossier
+            # Pour find/list : extraire les vrais chemins et envoyer les N premiers
             if cmd_reel in ("find", "list") and total_lines > 20:
-                dossiers = Counter()
-                for ligne_fb in lines:
-                    ligne_fb = ligne_fb.strip()
-                    if not ligne_fb or ligne_fb.startswith("[") or "resultat" in ligne_fb.lower() or "result" in ligne_fb.lower():
-                        continue
-                    # Extraire le dossier parent du chemin
-                    parts = ligne_fb.rsplit("\\", 1)
-                    if len(parts) == 2:
-                        dossiers[parts[0].strip()] += 1
-                    else:
-                        dossiers["(root)"] += 1
-                resume_lines = [f"{total_lines} files found. Breakdown by folder:"]
-                for dossier, count in dossiers.most_common(15):
-                    resume_lines.append(f"  {dossier} ({count})")
-                if len(dossiers) > 15:
-                    resume_lines.append(f"  ... and {len(dossiers)-15} more folders")
+                # Garder uniquement les lignes qui ressemblent a des chemins
+                chemins = [l.strip() for l in lines
+                           if l.strip() and l.strip().startswith(("C:\\","D:\\","E:\\","/"))
+                           and not l.strip().startswith("[")]
+                n_total = len(chemins)
+                _PATHS_MAX = 15
+                resume_lines = [f"Found {n_total} result(s). Showing first {min(n_total, _PATHS_MAX)}:"]
+                for p in chemins[:_PATHS_MAX]:
+                    resume_lines.append(f"  {p}")
+                if n_total > _PATHS_MAX:
+                    resume_lines.append(f"[...{n_total - _PATHS_MAX} more results not shown]")
                 sortie_fb = "\n".join(resume_lines)
             else:
                 sortie_fb = sortie[:_FB_MAX]
