@@ -96,7 +96,41 @@ echo.
 echo   Dossier  : %DEST%
 echo   Raccourci: %DESKTOP%\Fennec.lnk
 echo.
-echo   Lance Fennec depuis le raccourci
-echo   sur ton bureau.
+echo   Lance Fennec depuis le raccourci sur ton bureau.
+echo   Launch Fennec from the shortcut on your desktop.
+echo.
+
+REM --- Proposer de supprimer le dossier source ---
+echo   ------------------------------------------------
+echo   Ce dossier n'est plus necessaire.
+echo   Fennec est installe dans %DEST%.
+echo.
+echo   This folder is no longer needed.
+echo   Fennec is installed in %DEST%.
+echo   ------------------------------------------------
+echo.
+set /p CLEANUP="  Supprimer ce dossier source ? / Delete this source folder? (o/y/N) : "
+if /i "%CLEANUP%"=="o" goto do_cleanup
+if /i "%CLEANUP%"=="y" goto do_cleanup
+if /i "%CLEANUP%"=="oui" goto do_cleanup
+if /i "%CLEANUP%"=="yes" goto do_cleanup
+echo.
+echo   OK, dossier conserve. / OK, folder kept.
+echo.
+pause
+exit /b 0
+
+:do_cleanup
+echo.
+echo   Suppression en cours... / Deleting...
+cd /d "%USERPROFILE%"
+rmdir /s /q "%SRC%" 2>nul
+if exist "%SRC%" (
+    echo   [ATTENTION] Impossible de supprimer completement.
+    echo   Certains fichiers sont peut-etre en cours d'utilisation.
+    echo   [WARNING] Could not fully delete. Some files may be in use.
+) else (
+    echo   [OK] Dossier source supprime. / Source folder deleted.
+)
 echo.
 pause
